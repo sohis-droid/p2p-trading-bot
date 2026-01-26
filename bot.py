@@ -1,0 +1,763 @@
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, 
+    MessageHandler, filters, ContextTypes
+)
+from datetime import datetime, time
+import re
+import asyncio
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# CONFIG
+BOT_TOKEN = "8017921190:AAGKriw9cfrXSq7cdfzCAdg6omynDluykuU"
+LOBBY_CHAT_ID = -1003852307673
+DEAL_ROOMS = {1: -1003813180176, 2: -1003564453487, 3: -1003824500502}
+ESCROW_WALLETS = {
+    'BSC': '0x860b3201b0e8497dd6627b88a91a5866daa6abea',
+    'SOL': 'JCxHFLJFgfhiAYvV8UhZt5e7C4TmuPqqT7Py72FEt59E',
+    'TRX': 'TYwZvwPqjN8J6M3k5nF9xLqP8vR2sB4wK1'
+}
+
+# MODIFIED FEE STRUCTURE
+FEE_THRESHOLD = 1000
+FEE_FIXED = 1
+FEE_PERCENT = 0.15
+
+ADMIN_IDS = [7196865286]
+
+# MODIFIED PAYMENT MODES
+PAYMENT_MODES = ['CDM', 'CC (Cash Counter)', 'Cash (Hand to Hand)', 'Cash (Angadiya)']
+
+# DATA
+active_deals = {}
+deal_queue = []
+room_availability = {1: True, 2: True, 3: True}
+deal_statistics = []
+DEAL_ROOM_TIMEOUT = 300
+
+def get_available_room():
+    for room_num, available in room_availability.items():
+        if available:
+            return room_num
+    return None
+
+def calculate_fees(amount):
+    if amount <= FEE_THRESHOLD:
+        fee = FEE_FIXED
+    else:
+        fee = (amount * FEE_PERCENT) / 100
+    
+    return {
+        'amount': amount,
+        'fee': round(fee, 2),
+        'total': round(amount + fee, 2)
+    }
+
+def get_deal(room_num):
+    return active_deals.get(room_num)
+
+async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
+    if not deal_statistics:
+        return
+    
+    now = datetime.now()
+    last_24h = [d for d in deal_statistics if (now - d['completed_at']).total_seconds() <= 86400]
+    
+    if not last_24h:
+        return
+    
+    amounts = [d['amount'] for d in last_24h]
+    durations = [d['duration'] for d in last_24h]
+    
+    highest_bid = max(amounts)
+    lowest_bid = min(amounts)
+    longest_time = max(durations)
+    quickest_time = min(durations)
+    
+    stats_message = (
+        f"📊 *24-HOUR TRADING STATISTICS*\n\n"
+        f"💰 Highest Bid: ${highest_bid:,.2f}\n"
+        f"💵 Lowest Bid: ${lowest_bid:,.2f}\n"
+        f"⏱️ Longest Deal: {longest_time} minutes\n"
+        f"⚡ Quickest Deal: {quickest_time} minutes\n\n"
+        f"📈 Total Deals: {len(last_24h)}"
+    )
+    
+    try:
+        await context.bot.send_message(
+            LOBBY_CHAT_ID,
+            stats_message,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error sending daily stats: {e}")
+
+async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
+    await asyncio.sleep(DEAL_ROOM_TIMEOUT)
+    
+    deal = get_deal(room_num)
+    if deal and deal['status'] != 'completed':
+        original_msg_id = deal.get('original_msg_id')
+        
+        timeout_msg = (
+            f"⏱️ *DEAL ROOM EXPIRED*\n\n"
+            f"⚠️ No activity for 5 minutes. Both parties have been removed from the deal room."
+        )
+        
+        try:
+            await context.bot.send_message(
+                LOBBY_CHAT_ID,
+                timeout_msg,
+                parse_mode='Markdown',
+                reply_to_message_id=original_msg_id
+            )
+            
+            if 'lobby_msg_id' in deal:
+                await context.bot.delete_message(LOBBY_CHAT_ID, deal['lobby_msg_id'])
+        except Exception as e:
+            logger.error(f"Error sending timeout message: {e}")
+        
+        try:
+            await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+            await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+            if deal.get('buyer_id'):
+                await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+                await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+        except Exception as e:
+            logger.error(f"Error kicking users: {e}")
+        
+        room_availability[room_num] = True
+        del active_deals[room_num]
+
+async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    chat_type = update.message.chat.type
+    chat_title = update.message.chat.title if update.message.chat.title else "Private"
+    
+    await update.message.reply_text(
+        f"📊 *Chat Info*\n\n"
+        f"ID: `{chat_id}`\n"
+        f"Type: {chat_type}\n"
+        f"Title: {chat_title}",
+        parse_mode='Markdown'
+    )
+
+async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat_id != LOBBY_CHAT_ID:
+        return
+    
+    match = re.search(r'/deal\s+@(\w+)', update.message.text)
+    if not match:
+        await update.message.reply_text("❌ Use: `/deal @username`", parse_mode='Markdown')
+        return
+    
+    seller_id = update.message.from_user.id
+    seller_user = update.message.from_user.username or update.message.from_user.first_name
+    buyer_user = match.group(1)
+    
+    room_num = get_available_room()
+    if not room_num:
+        deal_queue.append((seller_id, buyer_user, seller_user))
+        await update.message.reply_text(f"⏳ All rooms busy! Queued (Position: {len(deal_queue)})")
+        return
+    
+    room_availability[room_num] = False
+    deal_id = f"DEAL{len(active_deals) + 1001}"
+    active_deals[room_num] = {
+        'deal_id': deal_id,
+        'room_num': room_num,
+        'seller_id': seller_id,
+        'seller_user': seller_user,
+        'buyer_user': buyer_user,
+        'buyer_id': None,
+        'status': 'init',
+        'created_at': datetime.now(),
+        'roles': [],
+        'original_msg_id': update.message.message_id,
+        'seller_joined': False,
+        'buyer_joined': False
+    }
+    
+    asyncio.create_task(check_deal_timeout(context, room_num))
+    
+    try:
+        room_id = DEAL_ROOMS[room_num]
+        
+        invite_link = await context.bot.create_chat_invite_link(
+            room_id,
+            member_limit=2,
+            name=f"Deal {deal_id}",
+            creates_join_request=False
+        )
+        
+        lobby_msg = await update.message.reply_text(
+            f"🏠 *Deal Room Created! [ROOM {room_num}]*\n\n"
+            f"🔗 *Join Link:* {invite_link.invite_link}\n\n"
+            f"👥 *Participants:*\n"
+            f"• @{seller_user} (Initiator)\n"
+            f"• @{buyer_user} (Counterparty)\n\n"
+            f"⚠️ *Note:* _Only the mentioned members can join. "
+            f"Never join any link shared via DM._\n\n"
+            f"⏱️ Started: {datetime.now().strftime('%I:%M %p')}\n"
+            f"⏳ Auto-expires in 5 minutes if no activity",
+            parse_mode='Markdown',
+            disable_web_page_preview=True
+        )
+        
+        active_deals[room_num]['lobby_msg_id'] = lobby_msg.message_id
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
+        room_availability[room_num] = True
+        del active_deals[room_num]
+
+async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    parts = q.data.split('_')
+    role = parts[1]
+    room_num = int(parts[2])
+    user_id = q.from_user.id
+    username = q.from_user.username or q.from_user.first_name
+    
+    deal = get_deal(room_num)
+    if not deal:
+        await q.edit_message_text("❌ Deal not found")
+        return
+    
+    if role == 'seller':
+        if user_id != deal['seller_id']:
+            await q.answer("❌ You're not the seller!", show_alert=True)
+            return
+        if 'seller' in deal['roles']:
+            await q.answer("✅ Already confirmed!", show_alert=True)
+            return
+        deal['roles'].append('seller')
+        await q.answer("✅ Confirmed!")
+    else:
+        if username != deal['buyer_user']:
+            await q.answer("❌ You're not the buyer!", show_alert=True)
+            return
+        if 'buyer' in deal['roles']:
+            await q.answer("✅ Already confirmed!", show_alert=True)
+            return
+        deal['buyer_id'] = user_id
+        deal['roles'].append('buyer')
+        await q.answer("✅ Confirmed!")
+    
+    if len(deal['roles']) == 2:
+        await q.edit_message_text(
+            f"✅ *Both parties confirmed!*\n\n"
+            f"Seller: @{deal['seller_user']}\n"
+            f"Buyer: @{username}",
+            parse_mode='Markdown'
+        )
+        
+        kb = [[InlineKeyboardButton("🚀 Start Setup", callback_data=f'setup_{room_num}')]]
+        await context.bot.send_message(
+            DEAL_ROOMS[room_num],
+            "✅ Both confirmed! Ready to start?",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+    else:
+        if 'seller' in deal['roles']:
+            status = "✅ Seller confirmed!\n⏳ Waiting for buyer..."
+        else:
+            status = "✅ Buyer confirmed!\n⏳ Waiting for seller..."
+        
+        kb = [
+            [InlineKeyboardButton("👤 I'm Seller", callback_data=f'role_seller_{room_num}')],
+            [InlineKeyboardButton("👤 I'm Buyer", callback_data=f'role_buyer_{room_num}')]
+        ]
+        
+        await q.edit_message_text(
+            f"🆕 *NEW DEAL*\n\nID: `{deal['deal_id']}`\n"
+            f"Seller: @{deal['seller_user']}\nBuyer: @{deal['buyer_user']}\n\n"
+            f"{status}",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    room_num = int(q.data.split('_')[1])
+    deal = get_deal(room_num)
+    
+    context.bot_data[f'room_{room_num}'] = room_num
+    context.bot_data[f'step_{room_num}'] = 'amount'
+    
+    await q.edit_message_text(f"💰 Seller @{deal['seller_user']}, enter amount (e.g., 1000):")
+
+async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat_id not in DEAL_ROOMS.values():
+        return
+    
+    room_num = None
+    for num, cid in DEAL_ROOMS.items():
+        if cid == update.message.chat_id:
+            room_num = num
+            break
+    
+    if not room_num:
+        return
+    
+    deal = get_deal(room_num)
+    if not deal:
+        return
+    
+    step = context.bot_data.get(f'step_{room_num}')
+    text = update.message.text.strip()
+    
+    if step == 'amount':
+        try:
+            deal['amount'] = float(text)
+            context.bot_data[f'step_{room_num}'] = 'rate'
+            
+            calc = calculate_fees(deal['amount'])
+            await update.message.reply_text(
+                f"✅ Amount: ${text}\n"
+                f"💵 Fee: ${calc['fee']}\n"
+                f"💎 Total with fee: ${calc['total']}\n\n"
+                f"📊 Enter rate (e.g., 93):"
+            )
+        except:
+            await update.message.reply_text("❌ Invalid! Enter number")
+            
+    elif step == 'rate':
+        try:
+            deal['rate'] = float(text)
+            context.bot_data[f'step_{room_num}'] = None
+            kb = [
+                [InlineKeyboardButton("BSC", callback_data=f'chain_BSC_{room_num}')],
+                [InlineKeyboardButton("Solana", callback_data=f'chain_SOL_{room_num}')],
+                [InlineKeyboardButton("Tron", callback_data=f'chain_TRX_{room_num}')]
+            ]
+            await update.message.reply_text(
+                f"✅ Rate: {text}\n\n⛓️ Select chain:",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        except:
+            await update.message.reply_text("❌ Invalid! Enter number")
+            
+    elif step == 'seller_wallet':
+        if update.message.from_user.id != deal['seller_id']:
+            return
+        deal['seller_wallet'] = text
+        context.bot_data[f'step_{room_num}'] = 'payment_details'
+        
+        pm = deal.get('payment_method', PAYMENT_MODES[0])
+        prompt = f"💳 Seller, enter your payment details for {pm}:"
+        
+        await update.message.reply_text(f"✅ Seller wallet saved!\n\n{prompt}")
+        
+    elif step == 'buyer_wallet':
+        if update.message.from_user.id != deal['buyer_id']:
+            return
+        deal['buyer_wallet'] = text
+        deal['status'] = 'wallets_set'
+        context.bot_data[f'step_{room_num}'] = None
+        
+        calc = calculate_fees(deal['amount'])
+        escrow = ESCROW_WALLETS[deal['chain']]
+        kb = [[InlineKeyboardButton("✅ I Sent Crypto", callback_data=f'sent_{room_num}')]]
+        
+        await update.message.reply_text(
+            f"✅ Buyer wallet saved!\n\n"
+            f"🔐 *ESCROW*\n\n"
+            f"💰 Amount: {deal['amount']} {deal['coin']}\n"
+            f"📊 Fee: {calc['fee']} {deal['coin']}\n"
+            f"━━━━━━━━━━━━━\n"
+            f"💎 Total: {calc['total']} {deal['coin']}\n\n"
+            f"⛓️ {deal['chain']}\n"
+            f"📥 `{escrow}`\n\n"
+            f"⚠️ Seller, send {calc['total']} {deal['coin']} to escrow, then click button.",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        
+    elif step == 'payment_details':
+        if update.message.from_user.id != deal['seller_id']:
+            return
+        deal['payment_details'] = text
+        context.bot_data[f'step_{room_num}'] = 'buyer_wallet'
+        
+        await update.message.reply_text(
+            f"✅ Payment details saved!\n\n"
+            f"👛 Buyer @{deal['buyer_user']}, enter your wallet address:"
+        )
+        
+    elif step == 'tx_hash':
+        if update.message.from_user.id != deal['seller_id']:
+            return
+        tx_hash = text
+        deal['tx_hash'] = tx_hash
+        deal['status'] = 'pending_verification'
+        context.bot_data[f'step_{room_num}'] = None
+        
+        calc = calculate_fees(deal['amount'])
+        chain = deal['chain']
+        escrow = ESCROW_WALLETS[chain]
+        
+        await update.message.reply_text(
+            f"✅ *TX HASH RECEIVED*\n\n"
+            f"Hash: `{tx_hash}`\n"
+            f"Chain: {chain}\n"
+            f"Expected: {calc['total']} {deal['coin']}\n\n"
+            f"⏳ Admin will verify manually...",
+            parse_mode='Markdown'
+        )
+        
+        kb = [[InlineKeyboardButton("✅ Verify & Approve", callback_data=f'verify_{room_num}')]]
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"🔔 *MANUAL VERIFICATION NEEDED*\n\n"
+                    f"Room: {room_num}\n"
+                    f"Deal ID: `{deal['deal_id']}`\n"
+                    f"Seller: @{deal['seller_user']}\n"
+                    f"Buyer: @{deal['buyer_user']}\n\n"
+                    f"Hash: `{tx_hash}`\n"
+                    f"Chain: {chain}\n"
+                    f"Expected: {calc['total']} {deal['coin']}\n"
+                    f"Escrow: `{escrow}`\n\n"
+                    f"⚠️ Please verify the transaction on blockchain and approve if valid.",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+            except:
+                pass
+
+async def chain_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    parts = q.data.split('_')
+    chain = parts[1]
+    room_num = int(parts[2])
+    deal = get_deal(room_num)
+    deal['chain'] = chain
+    
+    kb = [
+        [InlineKeyboardButton("USDT", callback_data=f'coin_USDT_{room_num}')],
+        [InlineKeyboardButton("USDC", callback_data=f'coin_USDC_{room_num}')]
+    ]
+    await q.edit_message_text(f"✅ Chain: {chain}\n\n💎 Select coin:", reply_markup=InlineKeyboardMarkup(kb))
+
+async def coin_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    parts = q.data.split('_')
+    coin = parts[1]
+    room_num = int(parts[2])
+    deal = get_deal(room_num)
+    deal['coin'] = coin
+    
+    kb = []
+    for mode in PAYMENT_MODES:
+        mode_short = mode.replace(' ', '_').replace('(', '').replace(')', '')[:15]
+        kb.append([InlineKeyboardButton(f"💳 {mode}", callback_data=f'pay_{mode_short}_{room_num}')])
+    
+    await q.edit_message_text(f"✅ Coin: {coin}\n\n💳 Payment method:", reply_markup=InlineKeyboardMarkup(kb))
+
+async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    parts = q.data.split('_')
+    pay_short = parts[1]
+    room_num = int(parts[2])
+    deal = get_deal(room_num)
+    
+    for mode in PAYMENT_MODES:
+        if mode.replace(' ', '_').replace('(', '').replace(')', '')[:15] == pay_short:
+            deal['payment_method'] = mode
+            break
+    
+    context.bot_data[f'step_{room_num}'] = 'seller_wallet'
+    await q.edit_message_text(f"✅ Payment: {deal['payment_method']}\n\n👛 Seller, enter wallet address:")
+
+async def crypto_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    room_num = int(q.data.split('_')[1])
+    context.bot_data[f'step_{room_num}'] = 'tx_hash'
+    await q.edit_message_text("📝 Seller, enter TX hash:")
+
+async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    if q.from_user.id not in ADMIN_IDS:
+        await q.answer("❌ Admin only!", show_alert=True)
+        return
+    
+    room_num = int(q.data.split('_')[1])
+    deal = get_deal(room_num)
+    deal['status'] = 'verified'
+    
+    await q.edit_message_text("✅ TX Verified by Admin!")
+    
+    fiat = deal['amount'] * deal['rate']
+    kb = [[InlineKeyboardButton("✅ I Paid Seller", callback_data=f'paid_{room_num}')]]
+    
+    await context.bot.send_message(
+        DEAL_ROOMS[room_num],
+        f"✅ *CRYPTO IN ESCROW!*\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💳 *BUYER'S TURN*\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"💰 Pay seller: *₹{fiat:,.2f}*\n"
+        f"📱 Method: *{deal['payment_method']}*\n\n"
+        f"*Payment Details:*\n"
+        f"`{deal['payment_details']}`\n\n"
+        f"⚠️ After payment, click button below:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def buyer_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    room_num = int(q.data.split('_')[1])
+    
+    await q.edit_message_text("✅ Payment claimed! Waiting seller...")
+    
+    kb = [
+        [InlineKeyboardButton("✅ Received", callback_data=f'release_{room_num}')],
+        [InlineKeyboardButton("❌ Dispute", callback_data=f'dispute_{room_num}')]
+    ]
+    
+    await context.bot.send_message(
+        DEAL_ROOMS[room_num],
+        f"💳 Seller, did you receive payment?",
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def release_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    room_num = int(q.data.split('_')[1])
+    deal = get_deal(room_num)
+    
+    await q.edit_message_text("✅ Seller confirmed! Releasing...")
+    
+    calc = calculate_fees(deal['amount'])
+    kb = [[InlineKeyboardButton("✅ Release", callback_data=f'final_{room_num}')]]
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id,
+                f"🔔 *RELEASE*\n\n"
+                f"Room: {room_num}\n"
+                f"Amount: {calc['amount']} {deal['coin']}\n"
+                f"To: `{deal['buyer_wallet']}`",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        except:
+            pass
+
+async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    if q.from_user.id not in ADMIN_IDS:
+        await q.answer("❌ Admin only!", show_alert=True)
+        return
+    
+    room_num = int(q.data.split('_')[1])
+    deal = get_deal(room_num)
+    
+    deal['completed_at'] = datetime.now()
+    duration = (deal['completed_at'] - deal['created_at']).seconds // 60
+    
+    deal_statistics.append({
+        'amount': deal['amount'],
+        'duration': duration,
+        'completed_at': deal['completed_at']
+    })
+    
+    await q.edit_message_text("✅ Released!")
+    
+    calc = calculate_fees(deal['amount'])
+    await context.bot.send_message(
+        DEAL_ROOMS[room_num],
+        f"🎉 *COMPLETED!*\n\n✅ {calc['amount']} {deal['coin']} released\n\nThank you! 🚀",
+        parse_mode='Markdown'
+    )
+    
+    original_msg_id = deal.get('original_msg_id')
+    await context.bot.send_message(
+        LOBBY_CHAT_ID,
+        f"✅ *DEAL COMPLETED*\n\n"
+        f"👥 *Participants:*\n"
+        f"• @{deal['seller_user']} (Seller)\n"
+        f"• @{deal['buyer_user']} (Buyer)\n\n"
+        f"⏱️ Duration: {duration} minutes\n"
+        f"🏠 Room {room_num} is now available",
+        parse_mode='Markdown',
+        reply_to_message_id=original_msg_id
+    )
+    
+    try:
+        if 'lobby_msg_id' in deal:
+            await context.bot.delete_message(LOBBY_CHAT_ID, deal['lobby_msg_id'])
+    except:
+        pass
+    
+    try:
+        await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+        await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+        await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+        await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+    except:
+        pass
+    
+    room_availability[room_num] = True
+    del active_deals[room_num]
+
+async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    
+    room_num = int(q.data.split('_')[1])
+    
+    await q.edit_message_text("⚠️ Dispute! Admin investigating...")
+    
+    kb = [
+        [InlineKeyboardButton("✅ Release", callback_data=f'final_{room_num}')],
+        [InlineKeyboardButton("🔄 Refund", callback_data=f'refund_{room_num}')]
+    ]
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                admin_id,
+                f"⚠️ *DISPUTE*\n\nRoom: {room_num}\nInvestigate!",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+        except:
+            pass
+
+async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat_id not in DEAL_ROOMS.values():
+        return
+    
+    room_num = None
+    for num, chat_id in DEAL_ROOMS.items():
+        if chat_id == update.message.chat_id:
+            room_num = num
+            break
+    
+    if not room_num:
+        return
+    
+    deal = get_deal(room_num)
+    if not deal:
+        return
+    
+    new_members = update.message.new_chat_members
+    
+    for member in new_members:
+        user_id = member.id
+        username = member.username or member.first_name
+        
+        if member.is_bot:
+            continue
+        
+        if user_id in ADMIN_IDS:
+            continue
+        
+        is_seller = user_id == deal.get('seller_id')
+        is_buyer = username == deal.get('buyer_user') or f"@{username}" == deal.get('buyer_user')
+        
+        if not (is_seller or is_buyer):
+            try:
+                await context.bot.ban_chat_member(update.message.chat_id, user_id)
+                await context.bot.unban_chat_member(update.message.chat_id, user_id)
+                
+                await context.bot.send_message(
+                    update.message.chat_id,
+                    f"❌ @{username} is not authorized for this deal and has been removed."
+                )
+                
+                logger.warning(f"Kicked unauthorized user {username} ({user_id}) from room {room_num}")
+            except Exception as e:
+                logger.error(f"Failed to kick user: {e}")
+        else:
+            if is_seller:
+                deal['seller_joined'] = True
+                logger.info(f"Seller @{username} joined room {room_num}")
+            if is_buyer:
+                deal['buyer_joined'] = True
+                logger.info(f"Buyer @{username} joined room {room_num}")
+            
+            if deal.get('seller_joined') and deal.get('buyer_joined'):
+                logger.info(f"Both parties joined room {room_num}, sending role selection")
+                kb = [
+                    [InlineKeyboardButton("👤 I'm Seller", callback_data=f'role_seller_{room_num}')],
+                    [InlineKeyboardButton("👤 I'm Buyer", callback_data=f'role_buyer_{room_num}')]
+                ]
+                
+                await context.bot.send_message(
+                    update.message.chat_id,
+                    f"🆕 *NEW DEAL*\n\n"
+                    f"ID: `{deal['deal_id']}`\n"
+                    f"Seller: @{deal['seller_user']}\n"
+                    f"Buyer: @{deal['buyer_user']}\n\n"
+                    f"⚠️ Both parties have joined! Please select your role:",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(kb)
+                )
+
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    try:
+        if app.job_queue:
+            app.job_queue.run_daily(
+                send_daily_stats,
+                time=time(hour=8, minute=30),
+                name='daily_stats'
+            )
+            logger.info("✅ Daily stats scheduler enabled")
+        else:
+            logger.warning("⚠️ JobQueue not available. Install with: pip install python-telegram-bot[job-queue]")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not schedule daily stats: {e}")
+    
+    app.add_handler(CommandHandler('getchatid', get_chat_id))
+    app.add_handler(CommandHandler('deal', deal_cmd))
+    app.add_handler(CallbackQueryHandler(role_select, pattern='^role_'))
+    app.add_handler(CallbackQueryHandler(start_setup, pattern='^setup_'))
+    app.add_handler(CallbackQueryHandler(chain_select, pattern='^chain_'))
+    app.add_handler(CallbackQueryHandler(coin_select, pattern='^coin_'))
+    app.add_handler(CallbackQueryHandler(pay_select, pattern='^pay_'))
+    app.add_handler(CallbackQueryHandler(crypto_sent, pattern='^sent_'))
+    app.add_handler(CallbackQueryHandler(verify_tx, pattern='^verify_'))
+    app.add_handler(CallbackQueryHandler(buyer_paid, pattern='^paid_'))
+    app.add_handler(CallbackQueryHandler(release_req, pattern='^release_'))
+    app.add_handler(CallbackQueryHandler(final_release, pattern='^final_'))
+    app.add_handler(CallbackQueryHandler(dispute, pattern='^dispute_'))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_member_join))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_handler))
+    
+    logger.info("🚀 Bot Starting...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()

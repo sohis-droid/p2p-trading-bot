@@ -13,12 +13,14 @@ logger = logging.getLogger(__name__)
 
 # CONFIG
 BOT_TOKEN = "8017921190:AAGKriw9cfrXSq7cdfzCAdg6omynDluykuU"
-LOBBY_CHAT_ID = -1003852307673
+LOBBY_CHAT_ID = -1003747221951  # Main Production Lobby
 DEAL_ROOMS = {1: -1003813180176, 2: -1003564453487, 3: -1003824500502}
+
+# PRODUCTION ESCROW WALLETS
 ESCROW_WALLETS = {
-    'BSC': '0x860b3201b0e8497dd6627b88a91a5866daa6abea',
-    'SOL': 'JCxHFLJFgfhiAYvV8UhZt5e7C4TmuPqqT7Py72FEt59E',
-    'TRX': 'TYwZvwPqjN8J6M3k5nF9xLqP8vR2sB4wK1'
+    'BSC': '0x004a789a76a88ae794965febe5f8ca3d5afd619a',
+    'Polygon': '0x004a789a76a88ae794965febe5f8ca3d5afd619a',
+    'SOL': 'JCxHFLJFgfhiAYvV8UhZt5e7C4TmuPqqT7Py72FEt59E'
 }
 
 # MODIFIED FEE STRUCTURE
@@ -194,16 +196,16 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         lobby_msg = await update.message.reply_text(
-            f"🏠 *Deal Room Created! [ROOM {room_num}]*\n\n"
+            f"🏠 *Deal Room Created! \\[ROOM {room_num}\\]*\n\n"
             f"🔗 *Join Link:* {invite_link.invite_link}\n\n"
             f"👥 *Participants:*\n"
             f"• @{seller_user} (Initiator)\n"
             f"• @{buyer_user} (Counterparty)\n\n"
-            f"⚠️ *Note:* _Only the mentioned members can join. "
-            f"Never join any link shared via DM._\n\n"
+            f"⚠️ *Note:* Only the mentioned members can join\\. "
+            f"Never join any link shared via DM\\.\n\n"
             f"⏱️ Started: {datetime.now().strftime('%I:%M %p')}\n"
-            f"⏳ Auto-expires in 5 minutes if no activity",
-            parse_mode='Markdown',
+            f"⏳ Auto\\-expires in 5 minutes if no activity",
+            parse_mode='MarkdownV2',
             disable_web_page_preview=True
         )
         
@@ -335,9 +337,9 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal['rate'] = float(text)
             context.bot_data[f'step_{room_num}'] = None
             kb = [
-                [InlineKeyboardButton("BSC", callback_data=f'chain_BSC_{room_num}')],
-                [InlineKeyboardButton("Solana", callback_data=f'chain_SOL_{room_num}')],
-                [InlineKeyboardButton("Tron", callback_data=f'chain_TRX_{room_num}')]
+                [InlineKeyboardButton("BSC (BNB Chain)", callback_data=f'chain_BSC_{room_num}')],
+                [InlineKeyboardButton("Polygon", callback_data=f'chain_Polygon_{room_num}')],
+                [InlineKeyboardButton("Solana", callback_data=f'chain_SOL_{room_num}')]
             ]
             await update.message.reply_text(
                 f"✅ Rate: {text}\n\n⛓️ Select chain:",

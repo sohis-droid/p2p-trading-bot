@@ -6,7 +6,7 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ContextTypes
 )
-from datetime import datetime, time
+from datetime import datetime, timedelta, time
 import re
 import asyncio
 
@@ -64,6 +64,10 @@ def calculate_fees(amount):
 def get_deal(room_num):
     return active_deals.get(room_num)
 
+def get_ist_time():
+    """Get current time in IST (UTC+5:30)"""
+    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%I:%M %p')
+
 async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
     if not deal_statistics:
         return
@@ -100,7 +104,11 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
     await asyncio.sleep(DEAL_ROOM_TIMEOUT)
     
     deal = get_deal(room_num)
-    if deal and deal['status'] != 'completed':
+    if not deal:
+        return
+    
+    # Only expire if deal hasn't started yet (still in role selection)
+    if deal['status'] == 'init' and not deal.get('roles_selected'):
         original_msg_id = deal.get('original_msg_id')
         
         timeout_msg = (
@@ -132,6 +140,10 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
         
         room_availability[room_num] = True
         del active_deals[room_num]
+        
+        logger.info(f"Deal in room {room_num} expired due to inactivity")
+    else:
+        logger.info(f"Deal in room {room_num} has started, timeout skipped")
 
 async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -174,14 +186,14 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'initiator_id': initiator_id,
         'initiator_user': initiator_user,
         'other_user': other_user,
-        'seller_id': None,  # Will be assigned when someone clicks
+        'seller_id': None,
         'seller_user': None,
-        'buyer_id': None,  # Will be assigned when someone clicks
+        'buyer_id': None,
         'buyer_user': None,
         'status': 'init',
         'created_at': datetime.now(),
         'roles': [],
-        'roles_selected': False,  # NEW: Track if both roles selected
+        'roles_selected': False,
         'original_msg_id': update.message.message_id,
         'seller_joined': False,
         'buyer_joined': False
@@ -199,6 +211,8 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             creates_join_request=False
         )
         
+        current_time = get_ist_time()
+        
         lobby_msg = await update.message.reply_text(
             f"🏠 Deal Room Created [ROOM {room_num}]\n\n"
             f"🔗 Join Link: {invite_link.invite_link}\n\n"
@@ -207,8 +221,8 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• @{other_user} (Counterparty)\n\n"
             f"⚠️ Note: Only the mentioned members can join. "
             f"Never join any link shared via DM.\n\n"
-            f"⏱️ Started: {datetime.now().strftime('%I:%M %p')}\n"
-            f"⏳ Auto-expires in 5 minutes if no activity",
+            f"⏱️ Started: {current_time} IST\n"
+            f"⏳ Auto-expires in 5 minutes if roles not selected",
             disable_web_page_preview=True
         )
         
@@ -236,7 +250,6 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("❌ Deal not found")
         return
     
-    # Check if roles are already selected
     if deal.get('roles_selected'):
         await q.answer("✅ Roles already confirmed!", show_alert=True)
         return
@@ -264,13 +277,12 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal['roles'].append('buyer')
         await q.answer("✅ You are now the Buyer!")
     
-    # Update status message
     seller_text = f"@{deal['seller_user']}" if deal.get('seller_user') else "Waiting..."
     buyer_text = f"@{deal['buyer_user']}" if deal.get('buyer_user') else "Waiting..."
     
-    # Check if both roles selected
     if len(deal['roles']) == 2:
         deal['roles_selected'] = True
+        deal['status'] = 'roles_confirmed'
         
         await q.edit_message_text(
             f"✅ Both parties confirmed!\n\n"
@@ -281,11 +293,11 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("🚀 Start Setup", callback_data=f'setup_{room_num}')]]
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
-            "✅ Both roles confirmed! Ready to start?",
+            "✅ Both roles confirmed! Ready to start?\n\n"
+            "⏱️ Note: Once you start, there is NO time limit. Admin can manage the deal if needed.",
             reply_markup=InlineKeyboardMarkup(kb)
         )
     else:
-        # One role selected, waiting for the other
         if 'seller' in deal['roles']:
             status = "✅ Seller confirmed!\n⏳ Waiting for buyer..."
         else:
@@ -311,6 +323,10 @@ async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     room_num = int(q.data.split('_')[1])
     deal = get_deal(room_num)
+    
+    # Mark deal as started - no more timeout
+    deal['status'] = 'in_progress'
+    deal['started_at'] = datetime.now()
     
     context.bot_data[f'room_{room_num}'] = room_num
     context.bot_data[f'step_{room_num}'] = 'amount'
@@ -668,6 +684,68 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
+async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to cancel any active deal"""
+    if update.message.from_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Admin only!")
+        return
+    
+    try:
+        room_num = int(context.args[0])
+        deal = get_deal(room_num)
+        
+        if not deal:
+            await update.message.reply_text(f"❌ No active deal in room {room_num}")
+            return
+        
+        try:
+            if deal.get('seller_id'):
+                await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+                await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+            if deal.get('buyer_id'):
+                await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+                await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+        except:
+            pass
+        
+        await context.bot.send_message(
+            DEAL_ROOMS[room_num],
+            "❌ Deal cancelled by admin"
+        )
+        
+        room_availability[room_num] = True
+        del active_deals[room_num]
+        
+        await update.message.reply_text(f"✅ Deal in room {room_num} cancelled")
+        
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /canceldeal <room_number>\nExample: /canceldeal 1")
+
+async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to see all active deals"""
+    if update.message.from_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Admin only!")
+        return
+    
+    if not active_deals:
+        await update.message.reply_text("✅ No active deals")
+        return
+    
+    msg = "📊 ACTIVE DEALS:\n\n"
+    for room_num, deal in active_deals.items():
+        duration = (datetime.now() - deal['created_at']).seconds // 60
+        msg += (
+            f"🏠 Room {room_num}\n"
+            f"ID: {deal['deal_id']}\n"
+            f"Seller: @{deal.get('seller_user', 'Not set')}\n"
+            f"Buyer: @{deal.get('buyer_user', 'Not set')}\n"
+            f"Status: {deal['status']}\n"
+            f"Duration: {duration} min\n"
+            f"────────────\n"
+        )
+    
+    await update.message.reply_text(msg)
+
 async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat_id not in DEAL_ROOMS.values():
         return
@@ -697,7 +775,6 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in ADMIN_IDS:
             continue
         
-        # Check if authorized (initiator or other party)
         is_initiator = user_id == deal.get('initiator_id')
         is_other = username == deal.get('other_user') or f"@{username}" == deal.get('other_user')
         
@@ -715,7 +792,6 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Failed to kick user: {e}")
         else:
-            # Track who joined
             if is_initiator:
                 deal['seller_joined'] = True
                 logger.info(f"Initiator @{username} joined room {room_num}")
@@ -723,7 +799,6 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 deal['buyer_joined'] = True
                 logger.info(f"Other party @{username} joined room {room_num}")
             
-            # When both join, show role selection
             if deal.get('seller_joined') and deal.get('buyer_joined'):
                 logger.info(f"Both parties joined room {room_num}, sending role selection")
                 kb = [
@@ -758,6 +833,8 @@ def main():
     
     app.add_handler(CommandHandler('getchatid', get_chat_id))
     app.add_handler(CommandHandler('deal', deal_cmd))
+    app.add_handler(CommandHandler('canceldeal', cancel_deal_admin))
+    app.add_handler(CommandHandler('activedeals', check_deals_admin))
     app.add_handler(CallbackQueryHandler(role_select, pattern='^role_'))
     app.add_handler(CallbackQueryHandler(start_setup, pattern='^setup_'))
     app.add_handler(CallbackQueryHandler(chain_select, pattern='^chain_'))

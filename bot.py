@@ -73,9 +73,9 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Use: /deal @username")
         return
 
-    initiator_id = update.message.from_user.id
-    initiator_user = update.message.from_user.username or update.message.from_user.first_name
-    other_user = match.group(1)
+    seller_id = update.message.from_user.id
+    seller_user = update.message.from_user.username or update.message.from_user.first_name
+    buyer_user = match.group(1)
 
     room = get_available_room()
     if not room:
@@ -87,9 +87,6 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     active_deals[room] = {
         "deal_id": deal_id,
-        "initiator_id": initiator_id,
-        "initiator_user": initiator_user,
-        "other_user": other_user,
         "seller_id": None,
         "seller_user": None,
         "buyer_id": None,
@@ -97,7 +94,9 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "roles_selected": False,
         "created_at": datetime.now(),
         "status": "init",
-        "original_msg_id": update.message.message_id
+        "original_msg_id": update.message.message_id,
+        "initiator_user": seller_user,
+        "other_user": buyer_user
     }
 
     asyncio.create_task(check_deal_timeout(context, room))
@@ -111,22 +110,19 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text(
         f"🏠 ROOM {room}\n\n"
         f"🔗 {invite.invite_link}\n\n"
-        f"Initiator: @{initiator_user}\n"
-        f"Other Party: @{other_user}"
+        f"Parties: @{seller_user} and @{buyer_user}"
     )
 
     active_deals[room]["lobby_msg_id"] = msg.message_id
     
-    # Send role selection buttons after delay
     asyncio.create_task(send_role_buttons(context, room))
 
 # -------------------- ROLE SELECTION --------------------
 async def send_role_buttons(context, room):
-    """Send role selection buttons to deal room"""
-    await asyncio.sleep(3)  # Wait for users to join
+    await asyncio.sleep(3)
     
     deal = get_deal(room)
-    if not deal or deal["roles_selected"]:
+    if not deal or deal.get("roles_selected"):
         return
     
     keyboard = [
@@ -139,15 +135,13 @@ async def send_role_buttons(context, room):
     try:
         await context.bot.send_message(
             chat_id=DEAL_ROOMS[room],
-            text=f"<b>{deal['deal_id']}</b>\n\n👥 Both parties select your roles:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="HTML"
+            text=f"{deal['deal_id']}\n\n👥 Both parties select your roles:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
     except Exception as e:
-        logger.error(f"Error sending role buttons: {e}")
+        logger.error(f"Error sending buttons: {e}")
 
 async def role_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle role selection button clicks"""
     query = update.callback_query
     await query.answer()
     
@@ -157,53 +151,42 @@ async def role_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     deal = get_deal(room)
     if not deal:
-        await query.edit_message_text("❌ Deal not found")
         return
     
     user_id = query.from_user.id
     username = query.from_user.username or query.from_user.first_name
     
-    # Handle seller selection
     if role == "seller":
-        if deal["seller_id"]:
+        if deal.get("seller_id"):
             await query.answer("⚠️ Seller role already taken!", show_alert=True)
             return
-        
         deal["seller_id"] = user_id
         deal["seller_user"] = username
     
-    # Handle buyer selection
     elif role == "buyer":
-        if deal["buyer_id"]:
+        if deal.get("buyer_id"):
             await query.answer("⚠️ Buyer role already taken!", show_alert=True)
             return
-        
         deal["buyer_id"] = user_id
         deal["buyer_user"] = username
     
-    # Update message with current selections
-    seller_text = f"@{deal['seller_user']}" if deal['seller_user'] else "Waiting..."
-    buyer_text = f"@{deal['buyer_user']}" if deal['buyer_user'] else "Waiting..."
+    seller = f"@{deal['seller_user']}" if deal.get('seller_user') else "Waiting..."
+    buyer = f"@{deal['buyer_user']}" if deal.get('buyer_user') else "Waiting..."
     
     await query.edit_message_text(
-        f"<b>{deal['deal_id']}</b>\n\n"
-        f"🛒 Seller: {seller_text}\n"
-        f"💰 Buyer: {buyer_text}",
-        parse_mode="HTML"
+        f"{deal['deal_id']}\n\n"
+        f"🛒 Seller: {seller}\n"
+        f"💰 Buyer: {buyer}"
     )
     
-    # Check if both roles selected
-    if deal["seller_id"] and deal["buyer_id"]:
+    if deal.get("seller_id") and deal.get("buyer_id"):
         deal["roles_selected"] = True
         deal["status"] = "roles_confirmed"
-        
         await context.bot.send_message(
-            chat_id=DEAL_ROOMS[room],
-            text=f"✅ <b>Roles Confirmed</b>\n\n"
-                 f"🛒 Seller: @{deal['seller_user']}\n"
-                 f"💰 Buyer: @{deal['buyer_user']}\n\n"
-                 f"Deal can now proceed...",
-            parse_mode="HTML"
+            DEAL_ROOMS[room],
+            f"✅ Roles confirmed!\n\n"
+            f"🛒 Seller: {seller}\n"
+            f"💰 Buyer: {buyer}"
         )
 
 # -------------------- TIMEOUT --------------------

@@ -501,10 +501,13 @@ async def coin_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal = get_deal(room_num)
     deal['coin'] = coin
     
-    kb = []
-    for mode in PAYMENT_MODES:
-        mode_short = mode.replace(' ', '_').replace('(', '').replace(')', '')[:15]
-        kb.append([InlineKeyboardButton(f"💳 {mode}", callback_data=f'pay_{mode_short}_{room_num}')])
+    # Use simple identifiers: cdm, cc, cash, angadiya
+    kb = [
+        [InlineKeyboardButton("💳 CDM", callback_data=f'paymode_cdm_{room_num}')],
+        [InlineKeyboardButton("💳 CC (Cash Counter)", callback_data=f'paymode_cc_{room_num}')],
+        [InlineKeyboardButton("💳 Cash (Hand to Hand)", callback_data=f'paymode_cash_{room_num}')],
+        [InlineKeyboardButton("💳 Cash (Angadiya)", callback_data=f'paymode_angadiya_{room_num}')]
+    ]
     
     await q.edit_message_text(f"✅ Coin: {coin}\n\n💳 Payment method:", reply_markup=InlineKeyboardMarkup(kb))
 
@@ -513,55 +516,43 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     parts = q.data.split('_')
-    pay_short = parts[1]
+    payment_type = parts[1]  # cdm, cc, cash, or angadiya
     room_num = int(parts[2])
     deal = get_deal(room_num)
     
-    # Debug logging
-    logger.info(f"Payment selection callback data: {q.data}")
-    logger.info(f"Extracted pay_short: {pay_short}")
+    logger.info(f"Payment selection: Type {payment_type}, Room {room_num}")
     
-    # Find the full payment method name
-    selected_method = None
-    for mode in PAYMENT_MODES:
-        # Create the shortened version exactly as it was created in coin_select
-        mode_key = mode.replace(' ', '_').replace('(', '').replace(')', '')[:15]
-        logger.info(f"Comparing {mode_key} with {pay_short}")
-        
-        if mode_key == pay_short:
-            selected_method = mode
-            logger.info(f"Match found! Selected method: {selected_method}")
-            break
+    # Map the identifier to actual payment mode name
+    payment_map = {
+        'cdm': 'CDM',
+        'cc': 'CC (Cash Counter)',
+        'cash': 'Cash (Hand to Hand)',
+        'angadiya': 'Cash (Angadiya)'
+    }
     
-    if selected_method:
-        deal['payment_method'] = selected_method
-        
-        # Check if Angadiya is selected - multiple checks to be sure
-        is_angadiya = (
-            'Angadiya' in selected_method or 
-            'angadiya' in selected_method.lower() or
-            'ANGADIYA' in selected_method.upper()
-        )
-        
-        logger.info(f"Is Angadiya: {is_angadiya}, Method: {selected_method}")
-        
-        if is_angadiya:
-            await q.edit_message_text(
-                f"✅ Payment Method Selected: {selected_method}\n\n"
-                f"⚠️ ⚠️ WARNING ⚠️ ⚠️\n\n"
-                f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n\n"
-                f"Both parties are responsible for ensuring safe exchange locations.\n\n"
-                f"👛 Seller, please enter your crypto wallet address:"
-            )
-        else:
-            await q.edit_message_text(
-                f"✅ Payment Method: {selected_method}\n\n"
-                f"👛 Seller, enter your crypto wallet address:"
-            )
-    else:
-        logger.error(f"No matching payment method found for: {pay_short}")
+    selected_method = payment_map.get(payment_type)
+    
+    if not selected_method:
+        logger.error(f"Unknown payment type: {payment_type}")
+        await q.edit_message_text("❌ Error selecting payment method. Please try again.")
+        return
+    
+    logger.info(f"Selected payment method: {selected_method}")
+    deal['payment_method'] = selected_method
+    
+    # Check if Angadiya is selected
+    if payment_type == 'angadiya':
+        logger.info("Angadiya selected - showing warning")
         await q.edit_message_text(
-            f"❌ Error selecting payment method. Please try again.\n\n"
+            f"✅ Payment Method: {selected_method}\n\n"
+            f"⚠️ ⚠️ WARNING ⚠️ ⚠️\n\n"
+            f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n\n"
+            f"Both parties are responsible for ensuring safe exchange locations.\n\n"
+            f"👛 Seller, please enter your crypto wallet address:"
+        )
+    else:
+        await q.edit_message_text(
+            f"✅ Payment Method: {selected_method}\n\n"
             f"👛 Seller, enter your crypto wallet address:"
         )
     
@@ -908,7 +899,7 @@ def main():
     app.add_handler(CallbackQueryHandler(start_setup, pattern='^setup_'))
     app.add_handler(CallbackQueryHandler(chain_select, pattern='^chain_'))
     app.add_handler(CallbackQueryHandler(coin_select, pattern='^coin_'))
-    app.add_handler(CallbackQueryHandler(pay_select, pattern='^pay_'))
+    app.add_handler(CallbackQueryHandler(pay_select, pattern='^paymode_'))  # CHANGED PATTERN
     app.add_handler(CallbackQueryHandler(crypto_sent, pattern='^sent_'))
     app.add_handler(CallbackQueryHandler(verify_tx, pattern='^verify_'))
     app.add_handler(CallbackQueryHandler(buyer_paid, pattern='^paid_'))

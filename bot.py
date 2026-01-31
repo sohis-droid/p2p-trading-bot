@@ -196,7 +196,8 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'roles_selected': False,
         'original_msg_id': update.message.message_id,
         'seller_joined': False,
-        'buyer_joined': False
+        'buyer_joined': False,
+        'process_msg_sent': False
     }
     
     asyncio.create_task(check_deal_timeout(context, room_num))
@@ -513,13 +514,27 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = int(parts[2])
     deal = get_deal(room_num)
     
+    # Find the full payment method name
+    selected_method = None
     for mode in PAYMENT_MODES:
         if mode.replace(' ', '_').replace('(', '').replace(')', '')[:15] == pay_short:
-            deal['payment_method'] = mode
+            selected_method = mode
             break
     
+    if selected_method:
+        deal['payment_method'] = selected_method
+        
+        # Check if Angadiya is selected
+        if 'Angadiya' in selected_method:
+            await q.edit_message_text(
+                f"✅ Payment: {selected_method}\n\n"
+                f"⚠️ WARNING: We do not take any accountability of place of cash transfer for Angadiya method.\n\n"
+                f"👛 Seller, enter wallet address:"
+            )
+        else:
+            await q.edit_message_text(f"✅ Payment: {selected_method}\n\n👛 Seller, enter wallet address:")
+    
     context.bot_data[f'step_{room_num}'] = 'seller_wallet'
-    await q.edit_message_text(f"✅ Payment: {deal['payment_method']}\n\n👛 Seller, enter wallet address:")
 
 async def crypto_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -799,8 +814,23 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 deal['buyer_joined'] = True
                 logger.info(f"Other party @{username} joined room {room_num}")
             
-            if deal.get('seller_joined') and deal.get('buyer_joined'):
+            # NEW: Send "Deal in process" message when both join
+            if deal.get('seller_joined') and deal.get('buyer_joined') and not deal.get('process_msg_sent'):
+                deal['process_msg_sent'] = True
+                
+                # Send to LOBBY
+                try:
+                    await context.bot.send_message(
+                        LOBBY_CHAT_ID,
+                        f"🤝 Deal between @{deal['initiator_user']} & @{deal['other_user']} is now in process.",
+                        reply_to_message_id=deal.get('original_msg_id')
+                    )
+                except:
+                    pass
+                
                 logger.info(f"Both parties joined room {room_num}, sending role selection")
+                
+                # Send role selection in DEAL ROOM
                 kb = [
                     [InlineKeyboardButton("🛒 I'm Seller", callback_data=f'role_seller_{room_num}')],
                     [InlineKeyboardButton("💰 I'm Buyer", callback_data=f'role_buyer_{room_num}')]

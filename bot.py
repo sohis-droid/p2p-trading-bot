@@ -179,6 +179,9 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_availability[room_num] = False
     deal_id = f"DEAL{len(active_deals) + 1001}"
     
+    # Save the message ID of the /deal command FIRST
+    original_msg_id = update.message.message_id
+    
     # MODIFIED: Flexible roles - not assigned at creation
     active_deals[room_num] = {
         'deal_id': deal_id,
@@ -194,7 +197,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'created_at': datetime.now(),
         'roles': [],
         'roles_selected': False,
-        'original_msg_id': update.message.message_id,
+        'original_msg_id': original_msg_id,
         'seller_joined': False,
         'buyer_joined': False,
         'process_msg_sent': False
@@ -517,22 +520,28 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Find the full payment method name
     selected_method = None
     for mode in PAYMENT_MODES:
-        if mode.replace(' ', '_').replace('(', '').replace(')', '')[:15] == pay_short:
+        mode_key = mode.replace(' ', '_').replace('(', '').replace(')', '')[:15]
+        if mode_key == pay_short:
             selected_method = mode
             break
     
     if selected_method:
         deal['payment_method'] = selected_method
         
-        # Check if Angadiya is selected
-        if 'Angadiya' in selected_method:
+        # Check if Angadiya is selected (check the actual mode name)
+        if 'Angadiya' in selected_method or 'angadiya' in selected_method.lower():
             await q.edit_message_text(
-                f"✅ Payment: {selected_method}\n\n"
-                f"⚠️ WARNING: We do not take any accountability of place of cash transfer for Angadiya method.\n\n"
-                f"👛 Seller, enter wallet address:"
+                f"✅ Payment Method Selected: {selected_method}\n\n"
+                f"⚠️ ⚠️ WARNING ⚠️ ⚠️\n\n"
+                f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n\n"
+                f"Both parties are responsible for ensuring safe exchange locations.\n\n"
+                f"👛 Seller, please enter your crypto wallet address:"
             )
         else:
-            await q.edit_message_text(f"✅ Payment: {selected_method}\n\n👛 Seller, enter wallet address:")
+            await q.edit_message_text(
+                f"✅ Payment Method: {selected_method}\n\n"
+                f"👛 Seller, enter your crypto wallet address:"
+            )
     
     context.bot_data[f'step_{room_num}'] = 'seller_wallet'
 
@@ -818,15 +827,15 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if deal.get('seller_joined') and deal.get('buyer_joined') and not deal.get('process_msg_sent'):
                 deal['process_msg_sent'] = True
                 
-                # Send to LOBBY
+                # Send to LOBBY - Reply to original /deal command
                 try:
                     await context.bot.send_message(
                         LOBBY_CHAT_ID,
                         f"🤝 Deal between @{deal['initiator_user']} & @{deal['other_user']} is now in process.",
                         reply_to_message_id=deal.get('original_msg_id')
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.error(f"Error sending process message: {e}")
                 
                 logger.info(f"Both parties joined room {room_num}, sending role selection")
                 

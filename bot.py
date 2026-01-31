@@ -517,19 +517,35 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = int(parts[2])
     deal = get_deal(room_num)
     
+    # Debug logging
+    logger.info(f"Payment selection callback data: {q.data}")
+    logger.info(f"Extracted pay_short: {pay_short}")
+    
     # Find the full payment method name
     selected_method = None
     for mode in PAYMENT_MODES:
+        # Create the shortened version exactly as it was created in coin_select
         mode_key = mode.replace(' ', '_').replace('(', '').replace(')', '')[:15]
+        logger.info(f"Comparing {mode_key} with {pay_short}")
+        
         if mode_key == pay_short:
             selected_method = mode
+            logger.info(f"Match found! Selected method: {selected_method}")
             break
     
     if selected_method:
         deal['payment_method'] = selected_method
         
-        # Check if Angadiya is selected (check the actual mode name)
-        if 'Angadiya' in selected_method or 'angadiya' in selected_method.lower():
+        # Check if Angadiya is selected - multiple checks to be sure
+        is_angadiya = (
+            'Angadiya' in selected_method or 
+            'angadiya' in selected_method.lower() or
+            'ANGADIYA' in selected_method.upper()
+        )
+        
+        logger.info(f"Is Angadiya: {is_angadiya}, Method: {selected_method}")
+        
+        if is_angadiya:
             await q.edit_message_text(
                 f"✅ Payment Method Selected: {selected_method}\n\n"
                 f"⚠️ ⚠️ WARNING ⚠️ ⚠️\n\n"
@@ -542,6 +558,12 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ Payment Method: {selected_method}\n\n"
                 f"👛 Seller, enter your crypto wallet address:"
             )
+    else:
+        logger.error(f"No matching payment method found for: {pay_short}")
+        await q.edit_message_text(
+            f"❌ Error selecting payment method. Please try again.\n\n"
+            f"👛 Seller, enter your crypto wallet address:"
+        )
     
     context.bot_data[f'step_{room_num}'] = 'seller_wallet'
 

@@ -823,9 +823,17 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 deal['buyer_joined'] = True
                 logger.info(f"Other party @{username} joined room {room_num}")
             
-            # NEW: Send "Deal in process" message when both join
+            # When both parties join
             if deal.get('seller_joined') and deal.get('buyer_joined') and not deal.get('process_msg_sent'):
                 deal['process_msg_sent'] = True
+                
+                # DELETE the invite link message from lobby
+                try:
+                    if 'lobby_msg_id' in deal:
+                        await context.bot.delete_message(LOBBY_CHAT_ID, deal['lobby_msg_id'])
+                        logger.info(f"Deleted invite link message for room {room_num}")
+                except Exception as e:
+                    logger.error(f"Error deleting invite link message: {e}")
                 
                 # Send to LOBBY - Reply to original /deal command
                 try:

@@ -783,6 +783,93 @@ async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(msg)
 
+async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manually complete a deal"""
+    if update.message.from_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Admin only!")
+        return
+    
+    try:
+        room_num = int(context.args[0])
+        deal = get_deal(room_num)
+        
+        if not deal:
+            await update.message.reply_text(f"❌ No active deal in room {room_num}")
+            return
+        
+        # Mark deal as completed
+        deal['completed_at'] = datetime.now()
+        duration = (deal['completed_at'] - deal['created_at']).seconds // 60
+        
+        # Add to statistics if amount exists
+        if deal.get('amount'):
+            deal_statistics.append({
+                'amount': deal['amount'],
+                'duration': duration,
+                'completed_at': deal['completed_at']
+            })
+        
+        # Send completion message to deal room
+        calc = calculate_fees(deal.get('amount', 0)) if deal.get('amount') else None
+        completion_msg = f"✅ DEAL COMPLETED BY ADMIN\n\n"
+        
+        if calc and deal.get('coin'):
+            completion_msg += f"💰 Amount: {calc['amount']} {deal['coin']}\n\n"
+        
+        completion_msg += "Thank you! 🚀"
+        
+        await context.bot.send_message(
+            DEAL_ROOMS[room_num],
+            completion_msg
+        )
+        
+        # Send notification to lobby
+        original_msg_id = deal.get('original_msg_id')
+        lobby_msg = (
+            f"✅ DEAL COMPLETED (Admin)\n\n"
+            f"👥 Participants:\n"
+            f"• @{deal.get('seller_user', 'N/A')} (Seller)\n"
+            f"• @{deal.get('buyer_user', 'N/A')} (Buyer)\n\n"
+            f"⏱️ Duration: {duration} minutes\n"
+            f"🏠 Room {room_num} is now available"
+        )
+        
+        if original_msg_id:
+            await context.bot.send_message(
+                LOBBY_CHAT_ID,
+                lobby_msg,
+                reply_to_message_id=original_msg_id
+            )
+        else:
+            await context.bot.send_message(LOBBY_CHAT_ID, lobby_msg)
+        
+        # Delete lobby message if exists
+        try:
+            if 'lobby_msg_id' in deal:
+                await context.bot.delete_message(LOBBY_CHAT_ID, deal['lobby_msg_id'])
+        except:
+            pass
+        
+        # Kick both parties from deal room
+        try:
+            if deal.get('seller_id'):
+                await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+                await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['seller_id'])
+            if deal.get('buyer_id'):
+                await context.bot.ban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+                await context.bot.unban_chat_member(DEAL_ROOMS[room_num], deal['buyer_id'])
+        except:
+            pass
+        
+        # Free the room
+        room_availability[room_num] = True
+        del active_deals[room_num]
+        
+        await update.message.reply_text(f"✅ Deal in room {room_num} marked as completed")
+        
+    except (IndexError, ValueError):
+        await update.message.reply_text("Usage: /completedeal <room_number>\nExample: /completedeal 1")
+
 async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat_id not in DEAL_ROOMS.values():
         return
@@ -895,11 +982,12 @@ def main():
     app.add_handler(CommandHandler('deal', deal_cmd))
     app.add_handler(CommandHandler('canceldeal', cancel_deal_admin))
     app.add_handler(CommandHandler('activedeals', check_deals_admin))
+    app.add_handler(CommandHandler('completedeal', complete_deal_admin))  # NEW COMMAND
     app.add_handler(CallbackQueryHandler(role_select, pattern='^role_'))
     app.add_handler(CallbackQueryHandler(start_setup, pattern='^setup_'))
     app.add_handler(CallbackQueryHandler(chain_select, pattern='^chain_'))
     app.add_handler(CallbackQueryHandler(coin_select, pattern='^coin_'))
-    app.add_handler(CallbackQueryHandler(pay_select, pattern='^paymode_'))  # CHANGED PATTERN
+    app.add_handler(CallbackQueryHandler(pay_select, pattern='^paymode_'))
     app.add_handler(CallbackQueryHandler(crypto_sent, pattern='^sent_'))
     app.add_handler(CallbackQueryHandler(verify_tx, pattern='^verify_'))
     app.add_handler(CallbackQueryHandler(buyer_paid, pattern='^paid_'))

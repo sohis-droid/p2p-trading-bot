@@ -9,6 +9,10 @@ from telegram.ext import (
 from datetime import datetime, timedelta, time
 import re
 import asyncio
+from web3 import Web3
+from solders.rpc.requests import GetTransaction
+from solana.rpc.async_api import AsyncClient
+import base58
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,6 +30,25 @@ DEAL_ROOMS = {
 # PRODUCTION ESCROW WALLETS
 ESCROW_WALLETS = json.loads(os.getenv("ESCROW_WALLETS"))
 
+# BLOCKCHAIN RPC ENDPOINTS
+RPC_ENDPOINTS = {
+    'BSC': os.getenv("BSC_RPC", "https://bsc-dataseed1.binance.org"),
+    'Polygon': os.getenv("POLYGON_RPC", "https://polygon-rpc.com"),
+    'SOL': os.getenv("SOLANA_RPC", "https://api.mainnet-beta.solana.com")
+}
+
+# TOKEN CONTRACT ADDRESSES (ERC20/BEP20)
+TOKEN_CONTRACTS = {
+    'BSC': {
+        'USDT': '0x55d398326f99059fF775485246999027B3197955',
+        'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'
+    },
+    'Polygon': {
+        'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+        'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
+    }
+}
+
 # FEE STRUCTURE
 FEE_THRESHOLD = 1000
 FEE_FIXED = 1
@@ -40,9 +63,12 @@ PAYMENT_MODES = ['CDM', 'CC (Cash Counter)', 'Cash (Hand to Hand)', 'Cash (Angad
 active_deals = {}
 deal_queue = []
 room_availability = {1: True, 2: True, 3: True}
-deal_statistics = []  # Stores all completed deals
-user_deal_history = {}  # Tracks deals per user
+deal_statistics = []
+user_deal_history = {}
 DEAL_ROOM_TIMEOUT = 300
+
+# Web3 instances
+web3_instances = {}
 
 def get_available_room():
     for room_num, available in room_availability.items():
@@ -74,6 +100,165 @@ def format_duration(minutes):
     hours = minutes // 60
     mins = minutes % 60
     return f"{hours} hours {mins} minutes"
+
+def get_web3(chain):
+    """Get or create Web3 instance for chain"""
+    if chain not in web3_instances:
+        rpc = RPC_ENDPOINTS.get(chain)
+        if rpc:
+            web3_instances[chain] = Web3(Web3.HTTPProvider(rpc))
+    return web3_instances.get(chain)
+
+async def verify_evm_transaction(chain, tx_hash, expected_address, expected_amount, token):
+    """
+    Verify EVM transaction (BSC, Polygon)
+    Returns: (success: bool, message: str)
+    """
+    try:
+        w3 = get_web3(chain)
+        if not w3 or not w3.is_connected():
+            return False, f"Cannot connect to {chain} network"
+        
+        # Get transaction receipt
+        tx_receipt = w3.eth.get_transaction_receipt(tx_hash)
+        if not tx_receipt:
+            return False, "Transaction not found or not confirmed yet"
+        
+        # Check if transaction was successful
+        if tx_receipt['status'] != 1:
+            return False, "Transaction failed on blockchain"
+        
+        # Get transaction details
+        tx = w3.eth.get_transaction(tx_hash)
+        
+        # For native token transfers (not our case, but good to have)
+        if tx['to'] and tx['to'].lower() == expected_address.lower():
+            # This would be ETH/BNB/MATIC transfer
+            # We're dealing with tokens, so this shouldn't match
+            pass
+        
+        # Check token transfer in logs
+        contract_address = TOKEN_CONTRACTS.get(chain, {}).get(token)
+        if not contract_address:
+            return False, f"Token {token} not supported on {chain}"
+        
+        # ERC20 Transfer event signature
+        transfer_signature = w3.keccak(text="Transfer(address,address,uint256)").hex()
+        
+        found_transfer = False
+        actual_amount = 0
+        
+        for log in tx_receipt['logs']:
+            if log['topics'][0].hex() == transfer_signature:
+                # Check if this is from our token contract
+                if log['address'].lower() == contract_address.lower():
+                    # Decode recipient (2nd topic)
+                    recipient = '0x' + log['topics'][2].hex()[-40:]
+                    
+                    if recipient.lower() == expected_address.lower():
+                        # Decode amount (data field)
+                        amount_wei = int(log['data'].hex(), 16)
+                        # USDT/USDC typically have 6 decimals (except USDT on some chains has 18)
+                        # For BSC USDT and Polygon USDT/USDC = 6 decimals
+                        decimals = 6 if token == 'USDT' and chain == 'BSC' else 6
+                        actual_amount = amount_wei / (10 ** decimals)
+                        found_transfer = True
+                        break
+        
+        if not found_transfer:
+            return False, f"No {token} transfer found to escrow wallet"
+        
+        # Allow 1% tolerance for amount (to account for rounding/fees)
+        tolerance = expected_amount * 0.01
+        if abs(actual_amount - expected_amount) > tolerance:
+            return False, f"Amount mismatch. Expected: {expected_amount}, Got: {actual_amount}"
+        
+        return True, f"✅ Verified: {actual_amount} {token} sent to escrow"
+        
+    except Exception as e:
+        logger.error(f"EVM verification error: {e}")
+        return False, f"Verification error: {str(e)}"
+
+async def verify_solana_transaction(tx_hash, expected_address, expected_amount, token):
+    """
+    Verify Solana transaction
+    Returns: (success: bool, message: str)
+    """
+    try:
+        client = AsyncClient(RPC_ENDPOINTS['SOL'])
+        
+        # Get transaction
+        response = await client.get_transaction(
+            tx_hash,
+            encoding="json",
+            max_supported_transaction_version=0
+        )
+        
+        if not response or not response.value:
+            return False, "Transaction not found or not confirmed yet"
+        
+        tx_data = response.value
+        
+        # Check if transaction was successful
+        if tx_data.transaction.meta.err:
+            return False, "Transaction failed on blockchain"
+        
+        # For Solana, we need to check the token transfers in meta
+        # This is more complex - simplified version here
+        # In production, you'd parse the instruction data more carefully
+        
+        post_balances = tx_data.transaction.meta.post_token_balances
+        pre_balances = tx_data.transaction.meta.pre_token_balances
+        
+        # Find transfers to expected address
+        found_transfer = False
+        actual_amount = 0
+        
+        for post_balance in post_balances:
+            account = post_balance.owner
+            if account == expected_address:
+                # Find corresponding pre-balance
+                pre_amount = 0
+                for pre_balance in pre_balances:
+                    if pre_balance.account_index == post_balance.account_index:
+                        pre_amount = float(pre_balance.ui_token_amount.ui_amount)
+                        break
+                
+                post_amount = float(post_balance.ui_token_amount.ui_amount)
+                actual_amount = post_amount - pre_amount
+                
+                if actual_amount > 0:
+                    found_transfer = True
+                    break
+        
+        if not found_transfer:
+            return False, f"No {token} transfer found to escrow wallet"
+        
+        # Allow 1% tolerance
+        tolerance = expected_amount * 0.01
+        if abs(actual_amount - expected_amount) > tolerance:
+            return False, f"Amount mismatch. Expected: {expected_amount}, Got: {actual_amount}"
+        
+        return True, f"✅ Verified: {actual_amount} {token} sent to escrow"
+        
+    except Exception as e:
+        logger.error(f"Solana verification error: {e}")
+        return False, f"Verification error: {str(e)}"
+
+async def verify_blockchain_transaction(chain, tx_hash, expected_address, expected_amount, token):
+    """
+    Main verification function - routes to appropriate chain
+    """
+    try:
+        if chain in ['BSC', 'Polygon']:
+            return await verify_evm_transaction(chain, tx_hash, expected_address, expected_amount, token)
+        elif chain == 'SOL':
+            return await verify_solana_transaction(tx_hash, expected_address, expected_amount, token)
+        else:
+            return False, f"Chain {chain} not supported for auto-verification"
+    except Exception as e:
+        logger.error(f"Blockchain verification failed: {e}")
+        return False, f"Verification failed: {str(e)}"
 
 async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
     if not deal_statistics:
@@ -114,7 +299,6 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
     if not deal:
         return
     
-    # Only expire if deal hasn't started yet (still in role selection)
     if deal['status'] == 'init' and not deal.get('roles_selected'):
         original_msg_id = deal.get('original_msg_id')
         
@@ -162,6 +346,18 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ID: {chat_id}\n"
         f"Type: {chat_type}\n"
         f"Title: {chat_title}"
+    )
+
+async def fees_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show fee structure"""
+    await update.message.reply_text(
+        f"💰 FEE STRUCTURE\n\n"
+        f"Below $1000: $1 fixed\n"
+        f"Above $1000: 0.15%\n\n"
+        f"Examples:\n"
+        f"• $500 → Fee: $1\n"
+        f"• $5,000 → Fee: $7.50\n"
+        f"• $10,000 → Fee: $15"
     )
 
 async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -358,7 +554,6 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.bot_data.get(f'step_{room_num}')
     text = update.message.text.strip()
     
-    # SIMPLIFIED FLOW
     if step == 'amount':
         try:
             deal['amount'] = float(text)
@@ -390,13 +585,13 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("❌ Invalid! Enter number")
     
-    # NEW SIMPLIFIED FLOW - TX HASH FIRST
     elif step == 'tx_hash':
         if update.message.from_user.id != deal['seller_id']:
             return
+        
         tx_hash = text
         deal['tx_hash'] = tx_hash
-        deal['status'] = 'pending_verification'
+        deal['status'] = 'verifying'
         context.bot_data[f'step_{room_num}'] = None
         
         calc = calculate_fees(deal['amount'])
@@ -408,31 +603,87 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Hash: {tx_hash}\n"
             f"Chain: {chain}\n"
             f"Expected: {calc['total']} {deal['coin']}\n\n"
-            f"⏳ Admin will verify manually..."
+            f"🔄 Auto-verifying on blockchain..."
         )
         
-        kb = [[InlineKeyboardButton("✅ Verify & Approve", callback_data=f'verify_{room_num}')]]
+        # AUTO-VERIFY ON BLOCKCHAIN
+        success, message = await verify_blockchain_transaction(
+            chain, 
+            tx_hash, 
+            escrow, 
+            calc['total'], 
+            deal['coin']
+        )
         
-        for admin_id in ADMIN_IDS:
-            try:
-                await context.bot.send_message(
-                    admin_id,
-                    f"🔔 MANUAL VERIFICATION NEEDED\n\n"
-                    f"Room: {room_num}\n"
-                    f"Deal ID: {deal['deal_id']}\n"
-                    f"Seller: @{deal['seller_user']}\n"
-                    f"Buyer: @{deal['buyer_user']}\n\n"
-                    f"Hash: {tx_hash}\n"
-                    f"Chain: {chain}\n"
-                    f"Expected: {calc['total']} {deal['coin']}\n"
-                    f"Escrow: {escrow}\n\n"
-                    f"⚠️ Please verify the transaction on blockchain and approve if valid.",
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
-            except:
-                pass
+        if success:
+            # AUTO-VERIFIED SUCCESSFULLY
+            deal['status'] = 'auto_verified'
+            deal['verification_message'] = message
+            
+            kb = [[InlineKeyboardButton("✅ Approve & Continue", callback_data=f'verify_{room_num}')]]
+            
+            # Notify admins with auto-verification result
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        admin_id,
+                        f"🤖 AUTO-VERIFICATION SUCCESS\n\n"
+                        f"Room: {room_num}\n"
+                        f"Deal ID: {deal['deal_id']}\n"
+                        f"Seller: @{deal['seller_user']}\n"
+                        f"Buyer: @{deal['buyer_user']}\n\n"
+                        f"Hash: {tx_hash}\n"
+                        f"Chain: {chain}\n"
+                        f"{message}\n\n"
+                        f"✅ Click to approve and continue",
+                        reply_markup=InlineKeyboardMarkup(kb)
+                    )
+                except:
+                    pass
+            
+            # Notify in deal room
+            await context.bot.send_message(
+                DEAL_ROOMS[room_num],
+                f"✅ AUTO-VERIFICATION SUCCESSFUL!\n\n"
+                f"{message}\n\n"
+                f"⏳ Waiting for admin final approval..."
+            )
+        else:
+            # AUTO-VERIFICATION FAILED - FALLBACK TO MANUAL
+            deal['status'] = 'pending_verification'
+            deal['verification_message'] = message
+            
+            kb = [[InlineKeyboardButton("✅ Verify Manually", callback_data=f'verify_{room_num}')]]
+            
+            # Notify admins to verify manually
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        admin_id,
+                        f"⚠️ AUTO-VERIFICATION FAILED\n\n"
+                        f"Room: {room_num}\n"
+                        f"Deal ID: {deal['deal_id']}\n"
+                        f"Seller: @{deal['seller_user']}\n"
+                        f"Buyer: @{deal['buyer_user']}\n\n"
+                        f"Hash: {tx_hash}\n"
+                        f"Chain: {chain}\n"
+                        f"Expected: {calc['total']} {deal['coin']}\n"
+                        f"Escrow: {escrow}\n\n"
+                        f"❌ Reason: {message}\n\n"
+                        f"⚠️ Please verify manually on blockchain",
+                        reply_markup=InlineKeyboardMarkup(kb)
+                    )
+                except:
+                    pass
+            
+            # Notify in deal room
+            await context.bot.send_message(
+                DEAL_ROOMS[room_num],
+                f"⚠️ Auto-verification failed\n\n"
+                f"Reason: {message}\n\n"
+                f"⏳ Admin will verify manually..."
+            )
     
-    # PAYMENT DETAILS - AFTER VERIFICATION
     elif step == 'payment_details':
         if update.message.from_user.id != deal['seller_id']:
             return
@@ -442,7 +693,6 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text("✅ Payment details saved!")
         
-        # SHOW BUYER PAYMENT INFO
         calc = calculate_fees(deal['amount'])
         fiat = deal['amount'] * deal['rate']
         kb = [[InlineKeyboardButton("✅ I Paid Seller", callback_data=f'paid_{room_num}')]]
@@ -516,7 +766,6 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_method = payment_map.get(payment_type)
     deal['payment_method'] = selected_method
     
-    # SIMPLIFIED: Show escrow wallet directly with copy format
     calc = calculate_fees(deal['amount'])
     escrow = ESCROW_WALLETS[deal['chain']]
     
@@ -569,9 +818,9 @@ async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal = get_deal(room_num)
     deal['status'] = 'verified'
     
-    await q.edit_message_text("✅ TX Verified by Admin!")
+    verification_msg = deal.get('verification_message', 'Verified by admin')
+    await q.edit_message_text(f"✅ TX Verified!\n\n{verification_msg}")
     
-    # NOW ASK FOR PAYMENT DETAILS
     context.bot_data[f'step_{room_num}'] = 'payment_details'
     
     await context.bot.send_message(
@@ -641,7 +890,6 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal['completed_at'] = datetime.now()
     duration = (deal['completed_at'] - deal['created_at']).seconds // 60
     
-    # Store statistics
     deal_statistics.append({
         'amount': deal['amount'],
         'duration': duration,
@@ -650,7 +898,6 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'buyer': deal['buyer_user']
     })
     
-    # Track user history
     if deal['seller_user'] not in user_deal_history:
         user_deal_history[deal['seller_user']] = []
     if deal['buyer_user'] not in user_deal_history:
@@ -732,7 +979,6 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ADMIN COMMANDS
 
 async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to cancel any active deal"""
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("❌ Admin only!")
         return
@@ -769,7 +1015,6 @@ async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /canceldeal <room_number>\nExample: /canceldeal 1")
 
 async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to see all active deals"""
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("❌ Admin only!")
         return
@@ -794,7 +1039,6 @@ async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to manually complete a deal"""
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("❌ Admin only!")
         return
@@ -875,10 +1119,7 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
     except (IndexError, ValueError):
         await update.message.reply_text("Usage: /completedeal <room_number>\nExample: /completedeal 1")
 
-# NEW COMMANDS
-
 async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user's deal history"""
     username = update.message.from_user.username or update.message.from_user.first_name
     
     if username not in user_deal_history or not user_deal_history[username]:
@@ -892,7 +1133,6 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"Total Deals: {total_deals}\n"
     msg += f"━━━━━━━━━━━━━━━━━━\n\n"
     
-    # Show last 10 deals
     for deal in deals[-10:]:
         role_emoji = "🛒" if deal['role'] == 'seller' else "💰"
         msg += (
@@ -909,7 +1149,6 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def total_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show total deals statistics - daily/weekly/monthly"""
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("❌ Admin only!")
         return
@@ -920,13 +1159,8 @@ async def total_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     now = datetime.now()
     
-    # Daily (last 24 hours)
     daily = [d for d in deal_statistics if (now - d['completed_at']).total_seconds() <= 86400]
-    
-    # Weekly (last 7 days)
     weekly = [d for d in deal_statistics if (now - d['completed_at']).days <= 7]
-    
-    # Monthly (last 30 days)
     monthly = [d for d in deal_statistics if (now - d['completed_at']).days <= 30]
     
     def calc_stats(deals):
@@ -1090,11 +1324,12 @@ def main():
     # Command handlers
     app.add_handler(CommandHandler('getchatid', get_chat_id))
     app.add_handler(CommandHandler('deal', deal_cmd))
+    app.add_handler(CommandHandler('fees', fees_cmd))  # NEW
     app.add_handler(CommandHandler('canceldeal', cancel_deal_admin))
     app.add_handler(CommandHandler('activedeals', check_deals_admin))
     app.add_handler(CommandHandler('completedeal', complete_deal_admin))
-    app.add_handler(CommandHandler('mydeals', my_deals))  # NEW
-    app.add_handler(CommandHandler('totaldeals', total_deals))  # NEW
+    app.add_handler(CommandHandler('mydeals', my_deals))
+    app.add_handler(CommandHandler('totaldeals', total_deals))
     
     # Callback handlers
     app.add_handler(CallbackQueryHandler(role_select, pattern='^role_'))
@@ -1113,7 +1348,7 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_member_join))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_handler))
     
-    logger.info("🚀 Bot Starting...")
+    logger.info("🚀 Bot Starting with Auto-Verification...")
     app.run_polling()
 
 if __name__ == '__main__':

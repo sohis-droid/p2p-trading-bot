@@ -585,6 +585,7 @@ async def buyer_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     room_num = int(q.data.split('_')[1])
+    deal = get_deal(room_num)
     
     await q.edit_message_text("✅ Payment claimed! Waiting for seller confirmation...")
     

@@ -158,9 +158,13 @@ async def verify_evm_transaction(chain, tx_hash, expected_address, expected_amou
                     if recipient.lower() == expected_address.lower():
                         # Decode amount (data field)
                         amount_wei = int(log['data'].hex(), 16)
-                        # USDT/USDC typically have 6 decimals (except USDT on some chains has 18)
-                        # For BSC USDT and Polygon USDT/USDC = 6 decimals
-                        decimals = 6 if token == 'USDT' and chain == 'BSC' else 6
+                        # BSC tokens use 18 decimals, Polygon uses 6 decimals
+                        if chain == 'BSC':
+                            decimals = 18  # BSC USDT/USDC use 18 decimals
+                        elif chain == 'Polygon':
+                            decimals = 6   # Polygon USDT/USDC use 6 decimals
+                        else:
+                            decimals = 6
                         actual_amount = amount_wei / (10 ** decimals)
                         found_transfer = True
                         break

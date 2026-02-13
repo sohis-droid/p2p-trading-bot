@@ -52,7 +52,7 @@ TOKEN_CONTRACTS = {
 # FEE STRUCTURE
 FEE_THRESHOLD = 1000
 FEE_FIXED = 1
-FEE_PERCENT = 0.15
+FEE_PERCENT = 0.1
 
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS").split(",")]
 
@@ -353,11 +353,11 @@ async def fees_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"💰 FEE STRUCTURE\n\n"
         f"Below $1000: $1 fixed\n"
-        f"Above $1000: 0.15%\n\n"
+        f"Above $1000: 0.1%\n\n"
         f"Examples:\n"
         f"• $500 → Fee: $1\n"
-        f"• $5,000 → Fee: $7.50\n"
-        f"• $10,000 → Fee: $15"
+        f"• $5,000 → Fee: $5\n"
+        f"• $10,000 → Fee: $10"
     )
 
 async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

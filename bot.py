@@ -335,15 +335,13 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
                    await context.bot.ban_chat_member(
                       DEAL_ROOMS[room_num],
                       uid
-            )
+                   )
                    await context.bot.unban_chat_member(
                       DEAL_ROOMS[room_num],
                       uid
-            )
-        except Exception as e:
-            logger.error(
-                f"Timeout kick failed: {e}"
-            )
+                   )
+                except Exception as e:
+                   logger.error(f"Timeout kick failed: {e}")
         except Exception as e:
             logger.error(f"Error kicking users: {e}")
         
@@ -1360,7 +1358,7 @@ def main():
     app.add_handler(CallbackQueryHandler(start_setup, pattern='^setup_'))
     app.add_handler(CallbackQueryHandler(chain_select, pattern='^chain_'))
     app.add_handler(CallbackQueryHandler(coin_select, pattern='^coin_'))
-    app.add_handler(CallbackQueryHandler(pay_select, pattern='^paymode_'))+------
+    app.add_handler(CallbackQueryHandler(pay_select, pattern='^paymode_'))
     app.add_handler(CallbackQueryHandler(crypto_sent, pattern='^sent_'))
     app.add_handler(CallbackQueryHandler(verify_tx, pattern='^verify_'))
     app.add_handler(CallbackQueryHandler(buyer_paid, pattern='^paid_'))

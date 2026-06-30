@@ -286,7 +286,7 @@ async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
         f"?? 24-HOUR TRADING STATISTICS\n\n"
         f"?? Highest Bid: ${highest_bid:,.2f}\n"
         f"?? Lowest Bid: ${lowest_bid:,.2f}\n"
-        f"?? Longest Deal: {format_duration(longest_time)}\n"
+        f"? Longest Deal: {format_duration(longest_time)}\n"
         f"? Quickest Deal: {format_duration(quickest_time)}\n\n"
         f"?? Total Deals: {len(last_24h)}"
     )
@@ -365,8 +365,8 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def fees_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-   """Show fee structure"""
-   await update.message.reply_text(
+    """Show fee structure"""
+    await update.message.reply_text(
     f"?? FEE STRUCTURE\n\n"
     f"Below $1000: $1 fixed\n"
     f"Above $1000: 0.1%\n\n"
@@ -781,9 +781,8 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if deal is None:
         logger.error(f"Room {room_num}: Deal not found!")
         await q.message.reply_text("? Deal not found. Please restart the deal.")
-    return
-    
-    
+        return
+
     payment_map = {
         'cdm': 'CDM',
         'cc': 'CC (Cash Counter)',

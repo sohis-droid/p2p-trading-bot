@@ -183,7 +183,7 @@ async def verify_evm_transaction(chain, tx_hash, expected_address, expected_amou
         if abs(actual_amount - expected_amount) > tolerance:
             return False, f"Amount mismatch. Expected: {expected_amount}, Got: {actual_amount}"
         
-        return True, f"? Verified: {actual_amount} {token} sent to escrow"
+        return True, f"✅ Verified: {actual_amount} {token} sent to escrow"
         
     except Exception as e:
         logger.error(f"EVM verification error: {e}")
@@ -249,7 +249,7 @@ async def verify_solana_transaction(tx_hash, expected_address, expected_amount, 
         if abs(actual_amount - expected_amount) > tolerance:
             return False, f"Amount mismatch. Expected: {expected_amount}, Got: {actual_amount}"
         
-        return True, f"? Verified: {actual_amount} {token} sent to escrow"
+        return True, f"✅ Verified: {actual_amount} {token} sent to escrow"
         
     except Exception as e:
         logger.error(f"Solana verification error: {e}")
@@ -289,12 +289,12 @@ async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
     quickest_time = min(durations)
     
     stats_message = (
-        f"?? 24-HOUR TRADING STATISTICS\n\n"
-        f"?? Highest USDT Rate: {highest_rate if highest_rate is not None else 'N/A'}\n"
-        f"?? Lowest USDT Rate: {lowest_rate if lowest_rate is not None else 'N/A'}\n"
-        f"? Longest Deal: {format_duration(longest_time)}\n"
-        f"? Quickest Deal: {format_duration(quickest_time)}\n\n"
-        f"?? Total Deals: {len(last_24h)}"
+        f"📊 24-HOUR TRADING STATISTICS\n\n"
+        f"📈 Highest USDT Rate: {highest_rate if highest_rate is not None else 'N/A'}\n"
+        f"📉 Lowest USDT Rate: {lowest_rate if lowest_rate is not None else 'N/A'}\n"
+        f"⏱ Longest Deal: {format_duration(longest_time)}\n"
+        f"⚡ Quickest Deal: {format_duration(quickest_time)}\n\n"
+        f"📦 Total Deals: {len(last_24h)}"
     )
     
     try:
@@ -313,7 +313,7 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
         original_msg_id = deal.get('original_msg_id')
         
         timeout_msg = (
-            f"?? DEAL ROOM EXPIRED\n\n"
+            f"⌛ DEAL ROOM EXPIRED\n\n"
             f"?? No activity for 5 minutes. Both parties have been removed from the deal room."
         )
         
@@ -364,7 +364,7 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_title = update.message.chat.title if update.message.chat.title else "Private"
     
     await update.message.reply_text(
-        f"?? Chat Info\n\n"
+        f"💬 Chat Info\n\n"
         f"ID: {chat_id}\n"
         f"Type: {chat_type}\n"
         f"Title: {chat_title}"
@@ -446,15 +446,15 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_time = get_ist_time()
         
         lobby_msg = await update.message.reply_text(
-            f"?? Deal Room Created [ROOM {room_num}]\n\n"
-            f"?? Join Link: {invite_link.invite_link}\n\n"
-            f"?? Participants:\n"
-            f"- @{initiator_user} (Initiator)\n"
-            f"- @{other_user} (Counterparty)\n\n"
-            f"?? Note: Only the mentioned members can join. "
-            f"Never join any link shared via DM.\n\n"
-            f"?? Started: {current_time} IST\n"
-            f"? Auto-expires in 5 minutes if roles not selected",
+            f"🆕 Deal Room Created [ROOM {room_num}]\n\n"
+            f"🔗 Join Link: {invite_link.invite_link}\n\n"
+            f"👥 Participants:\n"
+            f"• 👤 @{initiator_user} (Initiator)\n"
+            f"• 👤 @{other_user} (Counterparty)\n\n"
+            f"📝 Note: Only the mentioned members can join.\n"
+            f"⚠️ Never join any link shared via DM.\n\n"
+            f"🕒 Started: {current_time} IST\n"
+            f"⏳ Auto-expires in 5 minutes if roles are not selected.",
             disable_web_page_preview=True
         )
         
@@ -462,7 +462,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        await update.message.reply_text(f"? Error: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
         room_availability[room_num] = True
         del active_deals[room_num]
 
@@ -515,12 +515,12 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deal['status'] = 'roles_confirmed'
         
         await q.edit_message_text(
-            f"? Both parties confirmed!\n\n"
-            f"?? Seller: {seller_text}\n"
-            f"?? Buyer: {buyer_text}"
+            f"✅ Both parties confirmed!\n\n"
+            f"👤 Seller: {seller_text}\n"
+            f"👤 Buyer: {buyer_text}"
         )
         
-        kb = [[InlineKeyboardButton("?? Start Setup", callback_data=f'setup_{room_num}')]]
+        kb = [[InlineKeyboardButton("?🚀 Start Setup", callback_data=f'setup_{room_num}')]]
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
             "? Both roles confirmed! Ready to start?",
@@ -538,10 +538,10 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         await q.edit_message_text(
-            f"?? NEW DEAL\n\n"
+            f"🆕 NEW DEAL\n\n"
             f"ID: {deal['deal_id']}\n"
-            f"?? Seller: {seller_text}\n"
-            f"?? Buyer: {buyer_text}\n\n"
+            f"👤 Seller: {seller_text}\n"
+            f"👤 Buyer: {buyer_text}\n\n"
             f"{status}",
             reply_markup=InlineKeyboardMarkup(kb)
         )
@@ -588,7 +588,7 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             calc = calculate_fees(deal['amount'])
             await update.message.reply_text(
-                f"? Amount: ${text}\n"
+                f"💰 Amount: ${text}\n"
                 f"?? Fee: ${calc['fee']}\n"
                 f"?? Total with fee: ${calc['total']}\n\n"
                 f"?? Enter rate (e.g., 93):"
@@ -626,11 +626,11 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         escrow = ESCROW_WALLETS[chain]
         
         await update.message.reply_text(
-            f"? TX HASH RECEIVED\n\n"
-            f"Hash: {tx_hash}\n"
-            f"Chain: {chain}\n"
-            f"Expected: {calc['total']} {deal['coin']}\n\n"
-            f"?? Auto-verifying on blockchain..."
+            f""📨 TX HASH RECEIVED\n\n"
+            f"🔗 Hash: {tx_hash}\n"
+            f"🌐 Chain: {chain}\n"
+            f"💰 Expected: {calc['total']} {deal['coin']}\n\n"
+            f"🤖 Auto-verifying on blockchain..."
         )
         
         # AUTO-VERIFY ON BLOCKCHAIN
@@ -654,15 +654,15 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(
                         admin_id,
-                        f"?? AUTO-VERIFICATION SUCCESS\n\n"
-                        f"Room: {room_num}\n"
-                        f"Deal ID: {deal['deal_id']}\n"
-                        f"Seller: @{deal['seller_user']}\n"
-                        f"Buyer: @{deal['buyer_user']}\n\n"
-                        f"Hash: {tx_hash}\n"
-                        f"Chain: {chain}\n"
+                        f"🤖 AUTO-VERIFICATION SUCCESS\n\n"
+                        f"🚪 Room: {room_num}\n"
+                        f"🆔 Deal ID: {deal['deal_id']}\n"
+                        f"👤 Seller: @{deal['seller_user']}\n"
+                        f"👤 Buyer: @{deal['buyer_user']}\n\n"
+                        f"🔗 Hash: {tx_hash}\n"
+                        f"🌐 Chain: {chain}\n"
                         f"{message}\n\n"
-                        f"? Click to approve and continue",
+                        f"✅ Click to approve and continue",
                         reply_markup=InlineKeyboardMarkup(kb)
                     )
                 except:
@@ -671,9 +671,9 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Notify in deal room
             await context.bot.send_message(
                 DEAL_ROOMS[room_num],
-                f"? AUTO-VERIFICATION SUCCESSFUL!\n\n"
+                f"✅ AUTO-VERIFICATION SUCCESSFUL!\n\n"
                 f"{message}\n\n"
-                f"? Waiting for admin final approval..."
+                f"⏳ Waiting for admin final approval..."
             )
         else:
             # AUTO-VERIFICATION FAILED - FALLBACK TO MANUAL
@@ -687,17 +687,17 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(
                         admin_id,
-                        f"?? AUTO-VERIFICATION FAILED\n\n"
-                        f"Room: {room_num}\n"
-                        f"Deal ID: {deal['deal_id']}\n"
-                        f"Seller: @{deal['seller_user']}\n"
-                        f"Buyer: @{deal['buyer_user']}\n\n"
-                        f"Hash: {tx_hash}\n"
-                        f"Chain: {chain}\n"
-                        f"Expected: {calc['total']} {deal['coin']}\n"
-                        f"Escrow: {escrow}\n\n"
-                        f"? Reason: {message}\n\n"
-                        f"?? Please verify manually on blockchain",
+                        f"⚠️ AUTO-VERIFICATION FAILED\n\n"
+                        f"🚪 Room: {room_num}\n"
+                        f"🆔 Deal ID: {deal['deal_id']}\n"
+                        f"👤 Seller: @{deal['seller_user']}\n"
+                        f"👤 Buyer: @{deal['buyer_user']}\n\n"
+                        f"🔗 Hash: {tx_hash}\n"
+                        f"🌐 Chain: {chain}\n"
+                        f"💰 Expected: {calc['total']} {deal['coin']}\n"
+                        f"🔐 Escrow: {escrow}\n\n"
+                        f"❌ Reason: {message}\n\n"
+                        f"🔍 Please verify manually on the blockchain.",
                         reply_markup=InlineKeyboardMarkup(kb)
                     )
                 except:
@@ -706,9 +706,9 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Notify in deal room
             await context.bot.send_message(
                 DEAL_ROOMS[room_num],
-                f"?? Auto-verification failed\n\n"
-                f"Reason: {message}\n\n"
-                f"? Admin will verify manually..."
+                f"⚠️ AUTO-VERIFICATION FAILED\n\n"
+                f"❌Reason: {message}\n\n"
+                f"👤 Admin will verify manually..."
             )
     
     elif step == 'payment_details':
@@ -726,16 +726,16 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
-            f"??????????????????\n"
-            f"?? BUYER'S TURN\n"
-            f"??????????????????\n\n"
-            f"?? Total USDT: {calc['total']} {deal['coin']}\n"
-            f"?? Pay Seller: ?{fiat:,.2f}\n"
-            f"?? Payment Mode: {deal['payment_method']}\n"
-            f"?? Rate: {deal['rate']}\n\n"
-            f"Payment Details:\n"
-            f"{deal['payment_details']}\n\n"
-            f"?? After payment, click button below:",
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💵 BUYER'S TURN\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"💰 Total USDT: {calc['total']} {deal['coin']}\n"
+            f"👤 Pay Seller: 💵{fiat:,.2f}\n"
+            f"💳 Payment Mode: {deal['payment_method']}\n"
+            f"📈 Rate: {deal['rate']}\n\n"
+            f"💵Payment Details:\n"
+            f"📝{deal['payment_details']}\n\n"
+            f"💵 After payment, click button below:",
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
@@ -784,7 +784,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         parts = q.data.split('_')
         if len(parts) < 3:
-            await q.message.reply_text("?? Invalid payment selection. Please restart setup.")
+            await q.message.reply_text("⚠️ Invalid payment selection. Please restart setup.")
             return
         
         payment_type = parts[1]
@@ -793,7 +793,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if deal is None:
             logger.error(f"Room {room_num}: Deal not found!")
-            await q.message.reply_text("? Deal not found. Please restart the deal.")
+            await q.message.reply_text("❌ Deal not found. Please restart the deal.")
             return
 
         payment_map = {
@@ -805,14 +805,14 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         selected_method = payment_map.get(payment_type)
         if not selected_method:
-            await q.message.reply_text("?? Invalid payment mode selected.")
+            await q.message.reply_text("⚠️ Invalid payment mode selected.")
             return
         
         required_fields = ['amount', 'coin', 'chain', 'seller_user']
         missing = [field for field in required_fields if not deal.get(field)]
         if missing:
             logger.error(f"Room {room_num}: Missing deal fields: {missing}")
-            await q.message.reply_text("?? Deal setup is incomplete. Please restart setup.")
+            await q.message.reply_text("⚠️ Deal setup is incomplete. Please restart setup.")
             return
         
         deal['payment_method'] = selected_method
@@ -829,7 +829,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if not escrow:
             logger.error(f"Room {room_num}: Escrow wallet missing for {chain} {coin}")
-            await q.message.reply_text(f"?? Escrow wallet not configured for {chain} {coin}. Contact admin.")
+            await q.message.reply_text(f"⚠️ Escrow wallet not configured for {chain} {coin}. Contact admin.")
             return
         
         logger.info(f"Selected Payment: {selected_method}")
@@ -839,27 +839,27 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         warning = ""
         if payment_type == 'angadiya':
             warning = (
-                f"\n?? ANGADIYA WARNING\n\n"
+                f"\n⚠️ ANGADIYA WARNING\n\n"
                 f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n"
                 f"Both parties are responsible for ensuring safe exchange locations.\n"
             )
         
-        kb = [[InlineKeyboardButton("? I Sent Crypto", callback_data=f'sent_{room_num}')]]
+        kb = [[InlineKeyboardButton("✅ I Sent Crypto", callback_data=f'sent_{room_num}')]]
         
         await q.edit_message_text(
-            f"? Payment Method: {selected_method}\n"
+            f"✅ Payment Method: {selected_method}\n"
             f"{warning}\n"
-            f"????????????????????\n"
-            f"?? ESCROW WALLET\n"
-            f"????????????????????\n\n"
-            f"?? Amount: {deal['amount']} {coin}\n"
-            f"?? Fee: {calc['fee']} {coin}\n"
-            f"?? Total: {calc['total']} {coin}\n\n"
-            f"?? Chain: {chain}\n"
-            f"?? Coin: {coin}\n"
-            f"?? Wallet:\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏦 ESCROW WALLET\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💰 Amount: {deal['amount']} {coin}\n"
+            f"💸 Fee: {calc['fee']} {coin}\n"
+            f"🧾 Total: {calc['total']} {coin}\n\n"
+            f"🔗 Chain: {chain}\n"
+            f"🪙 Coin: {coin}\n"
+            f"🏦 Wallet:\n"
             f"{escrow}\n\n"
-            f"?? Seller @{deal['seller_user']}, send {calc['total']} {coin} to the above wallet, then click the button below.",
+            f"👤 Seller @{deal['seller_user']}, send {calc['total']} {coin} to the above wallet, then click the button below.",
             reply_markup=InlineKeyboardMarkup(kb)
         )
         
@@ -868,7 +868,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.exception(f"pay_select failed: {e}")
-        await q.message.reply_text("?? Something went wrong while selecting payment mode. Admin please check logs.")
+        await q.message.reply_text("⚠️ Something went wrong while selecting payment mode. Admin please check logs.")
 
 async def crypto_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -897,8 +897,8 @@ async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"? CRYPTO VERIFIED & IN ESCROW!\n\n"
-        f"?? Seller @{deal['seller_user']}, please provide your payment details for {deal['payment_method']}:"
+        f"✅ CRYPTO VERIFIED & IN ESCROW!\n\n"
+        f"👤 Seller @{deal['seller_user']}, please provide your payment details for {deal['payment_method']}:"
     )
 
 async def buyer_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -917,7 +917,7 @@ async def buyer_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"?? Seller @{deal['seller_user']}, did you receive the payment?",
+        f"👤 Seller @{deal['seller_user']}, did you receive the payment?",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
@@ -937,12 +937,12 @@ async def release_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 admin_id,
-                f"?? RELEASE REQUEST\n\n"
-                f"Room: {room_num}\n"
-                f"Deal ID: {deal['deal_id']}\n"
-                f"Amount: {calc['amount']} {deal['coin']}\n"
-                f"To: Buyer @{deal['buyer_user']}\n\n"
-                f"Seller confirmed receiving payment. Please release crypto.",
+                f"🚀 RELEASE REQUEST\n\n"
+                f"🚪Room: {room_num}\n"
+                f"🆔Deal ID: {deal['deal_id']}\n"
+                f"💰Amount: {calc['amount']} {deal['coin']}\n"
+                f"To: 👤Buyer @{deal['buyer_user']}\n\n"
+                f"👤Seller confirmed receiving payment. Please release crypto.",
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         except:
@@ -994,18 +994,18 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
     calc = calculate_fees(deal['amount'])
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"?? DEAL COMPLETED!\n\n? {calc['amount']} {deal['coin']} released to buyer\n\nThank you! ??"
+        f"🎉 DEAL COMPLETED!\n\n? {calc['amount']} {deal['coin']} released to buyer\n\nThank you! ??"
     )
     
     original_msg_id = deal.get('original_msg_id')
     await context.bot.send_message(
         LOBBY_CHAT_ID,
-        f"? DEAL COMPLETED\n\n"
-        f"?? Participants:\n"
+        f"🎉 DEAL COMPLETED\n\n"
+        f"👥 Participants:\n"
         f"- @{deal['seller_user']} (Seller)\n"
         f"- @{deal['buyer_user']} (Buyer)\n\n"
-        f"?? Duration: {format_duration(duration)}\n"
-        f"?? Room {room_num} is now available",
+        f"⏱️ Duration: {format_duration(duration)}\n"
+        f"🚪 Room {room_num} is now available",
         reply_to_message_id=original_msg_id
     )
     
@@ -1032,7 +1032,7 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     room_num = int(q.data.split('_')[1])
     
-    await q.edit_message_text("?? Dispute raised! Admin will investigate...")
+    await q.edit_message_text("⚠️ DISPUTE RAISED! Admin will investigate...")
     
     kb = [
         [InlineKeyboardButton("? Release to Buyer", callback_data=f'final_{room_num}')],
@@ -1043,7 +1043,7 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 admin_id,
-                f"?? DISPUTE RAISED\n\nRoom: {room_num}\nPlease investigate and resolve!",
+                f"⚠️ DISPUTE RAISED\n\nRoom: {room_num}\nPlease investigate and resolve!",
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         except:
@@ -1096,12 +1096,12 @@ async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("? No active deals")
         return
     
-    msg = "?? ACTIVE DEALS:\n\n"
+    msg = "📊 ACTIVE DEALS:\n\n"
     for room_num, deal in active_deals.items():
         duration = (get_ist_datetime() - deal['created_at']).seconds // 60
         msg += (
-            f"?? Room {room_num}\n"
-            f"ID: {deal['deal_id']}\n"
+            f"🚪 Room {room_num}\n"
+            f"🆔: {deal['deal_id']}\n"
             f"Seller: @{deal.get('seller_user', 'Not set')}\n"
             f"Buyer: @{deal.get('buyer_user', 'Not set')}\n"
             f"Status: {deal['status']}\n"
@@ -1141,7 +1141,7 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         completion_msg = f"? DEAL COMPLETED BY ADMIN\n\n"
         
         if calc and deal.get('coin'):
-            completion_msg += f"?? Amount: {calc['amount']} {deal['coin']}\n\n"
+            completion_msg += f"?💰 Amount: {calc['amount']} {deal['coin']}\n\n"
         
         completion_msg += "Thank you! ??"
         
@@ -1152,12 +1152,12 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         original_msg_id = deal.get('original_msg_id')
         lobby_msg = (
-            f"? DEAL COMPLETED (Admin)\n\n"
-            f"?? Participants:\n"
+            f"🎉 DEAL COMPLETED (Admin)\n\n"
+            f"👥 Participants:\n"
             f"- @{deal.get('seller_user', 'N/A')} (Seller)\n"
             f"- @{deal.get('buyer_user', 'N/A')} (Buyer)\n\n"
-            f"?? Duration: {format_duration(duration)}\n"
-            f"?? Room {room_num} is now available"
+            f"⏱️ Duration: {format_duration(duration)}\n"
+            f"🚪 Room {room_num} is now available"
         )
         
         if original_msg_id:
@@ -1203,9 +1203,9 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deals = user_deal_history[username]
     total_deals = len(deals)
     
-    msg = f"?? YOUR DEAL HISTORY\n\n"
+    msg = f"📜 YOUR DEAL HISTORY\n\n"
     msg += f"Total Deals: {total_deals}\n"
-    msg += f"??????????????????\n\n"
+    msg += f"━━━━━━━━━━━━━━━━━━\n\n"
     
     for deal in deals[-10:]:
         role_emoji = "??" if deal['role'] == 'seller' else "??"
@@ -1224,11 +1224,11 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def total_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("? Admin only!")
+        await update.message.reply_text("❌ Admin only!")
         return
     
     if not deal_statistics:
-        await update.message.reply_text("?? No deals completed yet.")
+        await update.message.reply_text("📭 No deals completed yet.")
         return
     
     now = get_ist_datetime()
@@ -1238,11 +1238,11 @@ async def total_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     monthly = [d for d in deal_statistics if (now - d['completed_at']).days <= 30]
     
     msg = (
-        f"?? DEAL STATISTICS\n\n"
-        f"?? 1 Day Deals: {len(daily)}\n"
-        f"?? Weekly Deals: {len(weekly)}\n"
-        f"?? Monthly Deals: {len(monthly)}\n"
-        f"?? Deals Since Beginning: {len(deal_statistics)}"
+        f"📊 DEAL STATISTICS\n\n"
+        f"📅 1 Day Deals: {len(daily)}\n"
+        f"🗓 Weekly Deals: {len(weekly)}\n"
+        f"📆 Monthly Deals: {len(monthly)}\n"
+        f"🏁 Deals Since Beginning: {len(deal_statistics)}"
     )
     
     await update.message.reply_text(msg)
@@ -1286,7 +1286,7 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await context.bot.send_message(
                     update.message.chat_id,
-                    f"? @{username} is not authorized for this deal and has been removed."
+                    f"👤 @{username} is not authorized for this deal and has been removed."
                 )
                 
                 logger.warning(f"Kicked unauthorized user {username} ({user_id}) from room {room_num}")
@@ -1315,7 +1315,7 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(
                         LOBBY_CHAT_ID,
-                        f"?? Deal between @{deal['initiator_user']} & @{deal['other_user']} is now in process.",
+                        f"👥Deal between @{deal['initiator_user']} & @{deal['other_user']} is now in process.",
                         reply_to_message_id=deal.get('original_msg_id')
                     )
                 except Exception as e:
@@ -1330,10 +1330,10 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await context.bot.send_message(
                     update.message.chat_id,
-                    f"?? NEW DEAL\n\n"
-                    f"ID: {deal['deal_id']}\n"
+                    f"🆕 NEW DEAL\n\n"
+                    f"🆔: {deal['deal_id']}\n"
                     f"Parties: @{deal['initiator_user']} & @{deal['other_user']}\n\n"
-                    f"?? Both parties have joined! Please select your role:",
+                    f"👥 Both parties have joined! Please select your role:",
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
 
@@ -1385,3 +1385,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+

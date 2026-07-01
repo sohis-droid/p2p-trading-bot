@@ -626,7 +626,7 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         escrow = ESCROW_WALLETS[chain]
         
         await update.message.reply_text(
-            f""📨 TX HASH RECEIVED\n\n"
+            f"📨 TX HASH RECEIVED\n\n"
             f"🔗 Hash: {tx_hash}\n"
             f"🌐 Chain: {chain}\n"
             f"💰 Expected: {calc['total']} {deal['coin']}\n\n"

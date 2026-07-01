@@ -6,7 +6,7 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ContextTypes
 )
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 import re
 import asyncio
 from web3 import Web3
@@ -91,9 +91,15 @@ def calculate_fees(amount):
 def get_deal(room_num):
     return active_deals.get(room_num)
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_datetime():
+    """Get current timezone-aware IST datetime."""
+    return datetime.now(IST)
+
 def get_ist_time():
-    """Get current time in IST (UTC+5:30)"""
-    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%I:%M %p')
+    """Get current time in IST (UTC+5:30)."""
+    return get_ist_datetime().strftime('%I:%M %p')
 
 def format_duration(minutes):
     """Convert minutes to HH:MM format"""
@@ -268,24 +274,24 @@ async def send_daily_stats(context: ContextTypes.DEFAULT_TYPE):
     if not deal_statistics:
         return
     
-    now = datetime.now()
+    now = get_ist_datetime()
     last_24h = [d for d in deal_statistics if (now - d['completed_at']).total_seconds() <= 86400]
     
     if not last_24h:
         return
     
-    amounts = [d['amount'] for d in last_24h]
+    rates = [d.get('rate') for d in last_24h if d.get('rate') is not None]
     durations = [d['duration'] for d in last_24h]
     
-    highest_bid = max(amounts)
-    lowest_bid = min(amounts)
+    highest_rate = max(rates) if rates else None
+    lowest_rate = min(rates) if rates else None
     longest_time = max(durations)
     quickest_time = min(durations)
     
     stats_message = (
         f"?? 24-HOUR TRADING STATISTICS\n\n"
-        f"?? Highest Bid: ${highest_bid:,.2f}\n"
-        f"?? Lowest Bid: ${lowest_bid:,.2f}\n"
+        f"?? Highest USDT Rate: {highest_rate if highest_rate is not None else 'N/A'}\n"
+        f"?? Lowest USDT Rate: {lowest_rate if lowest_rate is not None else 'N/A'}\n"
         f"? Longest Deal: {format_duration(longest_time)}\n"
         f"? Quickest Deal: {format_duration(quickest_time)}\n\n"
         f"?? Total Deals: {len(last_24h)}"
@@ -412,7 +418,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'buyer_id': None,
         'buyer_user': None,
         'status': 'init',
-        'created_at': datetime.now(),
+        'created_at': get_ist_datetime(),
         'roles': [],
         'roles_selected': False,
         'original_msg_id': original_msg_id,
@@ -548,7 +554,7 @@ async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal = get_deal(room_num)
     
     deal['status'] = 'in_progress'
-    deal['started_at'] = datetime.now()
+    deal['started_at'] = get_ist_datetime()
     
     context.bot_data[f'room_{room_num}'] = room_num
     context.bot_data[f'step_{room_num}'] = 'amount'
@@ -770,63 +776,99 @@ async def coin_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
-    logger.info("===== pay_select() START =====")
-    parts = q.data.split('_')
-    logger.info(f"Callback Data: {q.data}")
-    payment_type = parts[1]
-    room_num = int(parts[2])
-    deal = get_deal(room_num)
+    await q.answer("Payment mode selected")
+    
+    try:
+        logger.info("===== pay_select() START =====")
+        logger.info(f"Callback Data: {q.data}")
+        
+        parts = q.data.split('_')
+        if len(parts) < 3:
+            await q.message.reply_text("?? Invalid payment selection. Please restart setup.")
+            return
+        
+        payment_type = parts[1]
+        room_num = int(parts[2])
+        deal = get_deal(room_num)
 
-    if deal is None:
-        logger.error(f"Room {room_num}: Deal not found!")
-        await q.message.reply_text("? Deal not found. Please restart the deal.")
-        return
+        if deal is None:
+            logger.error(f"Room {room_num}: Deal not found!")
+            await q.message.reply_text("? Deal not found. Please restart the deal.")
+            return
 
-    payment_map = {
-        'cdm': 'CDM',
-        'cc': 'CC (Cash Counter)',
-        'cash': 'Cash (Hand to Hand)',
-        'angadiya': 'Cash (Angadiya)'
-    }
-    
-    selected_method = payment_map.get(payment_type)
-    logger.info(f"Selected Payment: {selected_method}")
-    deal['payment_method'] = selected_method
-    
-    calc = calculate_fees(deal['amount'])
-    logger.info(f"Chain = {deal['chain']}")
-    escrow = ESCROW_WALLETS[deal['chain']]
-    logger.info(f"Escrow Wallet = {escrow}")
-    
-    warning = ""
-    if payment_type == 'angadiya':
-        warning = (
-            f"\n?? ?? WARNING ?? ??\n\n"
-            f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n"
-            f"Both parties are responsible for ensuring safe exchange locations.\n"
+        payment_map = {
+            'cdm': 'CDM',
+            'cc': 'CC (Cash Counter)',
+            'cash': 'Cash (Hand to Hand)',
+            'angadiya': 'Cash (Angadiya)'
+        }
+        
+        selected_method = payment_map.get(payment_type)
+        if not selected_method:
+            await q.message.reply_text("?? Invalid payment mode selected.")
+            return
+        
+        required_fields = ['amount', 'coin', 'chain', 'seller_user']
+        missing = [field for field in required_fields if not deal.get(field)]
+        if missing:
+            logger.error(f"Room {room_num}: Missing deal fields: {missing}")
+            await q.message.reply_text("?? Deal setup is incomplete. Please restart setup.")
+            return
+        
+        deal['payment_method'] = selected_method
+        
+        calc = calculate_fees(deal['amount'])
+        chain = deal['chain']
+        coin = deal['coin']
+        escrow_data = ESCROW_WALLETS.get(chain)
+        
+        if isinstance(escrow_data, dict):
+            escrow = escrow_data.get(coin) or escrow_data.get("address")
+        else:
+            escrow = escrow_data
+        
+        if not escrow:
+            logger.error(f"Room {room_num}: Escrow wallet missing for {chain} {coin}")
+            await q.message.reply_text(f"?? Escrow wallet not configured for {chain} {coin}. Contact admin.")
+            return
+        
+        logger.info(f"Selected Payment: {selected_method}")
+        logger.info(f"Chain = {chain}")
+        logger.info(f"Escrow Wallet = {escrow}")
+        
+        warning = ""
+        if payment_type == 'angadiya':
+            warning = (
+                f"\n?? ANGADIYA WARNING\n\n"
+                f"We do NOT take any accountability for the place of cash transfer when using Angadiya method.\n"
+                f"Both parties are responsible for ensuring safe exchange locations.\n"
+            )
+        
+        kb = [[InlineKeyboardButton("? I Sent Crypto", callback_data=f'sent_{room_num}')]]
+        
+        await q.edit_message_text(
+            f"? Payment Method: {selected_method}\n"
+            f"{warning}\n"
+            f"????????????????????\n"
+            f"?? ESCROW WALLET\n"
+            f"????????????????????\n\n"
+            f"?? Amount: {deal['amount']} {coin}\n"
+            f"?? Fee: {calc['fee']} {coin}\n"
+            f"?? Total: {calc['total']} {coin}\n\n"
+            f"?? Chain: {chain}\n"
+            f"?? Coin: {coin}\n"
+            f"?? Wallet:\n"
+            f"{escrow}\n\n"
+            f"?? Seller @{deal['seller_user']}, send {calc['total']} {coin} to the above wallet, then click the button below.",
+            reply_markup=InlineKeyboardMarkup(kb)
         )
-    
-    kb = [[InlineKeyboardButton("? I Sent Crypto", callback_data=f'sent_{room_num}')]]
-    
-    await q.edit_message_text(
-        f"? Payment Method: {selected_method}\n"
-        f"{warning}\n"
-        f"??????????????????\n"
-        f"?? ESCROW WALLET\n"
-        f"??????????????????\n\n"
-        f"?? Amount: {deal['amount']} {deal['coin']}\n"
-        f"?? Fee: {calc['fee']} {deal['coin']}\n"
-        f"?? Total: {calc['total']} {deal['coin']}\n\n"
-        f"?? Chain: {deal['chain']}\n"
-        f"?? Wallet:\n"
-        f"`{escrow}`\n\n"
-        f"?? Seller @{deal['seller_user']}, send {calc['total']} {deal['coin']} to the above wallet, then click button.",
-        reply_markup=InlineKeyboardMarkup(kb),
-        parse_mode='Markdown'
-    )
-    
-    context.bot_data[f'step_{room_num}'] = None
+        
+        context.bot_data[f'step_{room_num}'] = None
+        logger.info(f"Room {room_num}: Payment mode selected successfully")
+        
+    except Exception as e:
+        logger.exception(f"pay_select failed: {e}")
+        await q.message.reply_text("?? Something went wrong while selecting payment mode. Admin please check logs.")
 
 async def crypto_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -917,11 +959,12 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = int(q.data.split('_')[1])
     deal = get_deal(room_num)
     
-    deal['completed_at'] = datetime.now()
+    deal['completed_at'] = get_ist_datetime()
     duration = (deal['completed_at'] - deal['created_at']).seconds // 60
     
     deal_statistics.append({
         'amount': deal['amount'],
+        'rate': deal.get('rate'),
         'duration': duration,
         'completed_at': deal['completed_at'],
         'seller': deal['seller_user'],
@@ -1055,7 +1098,7 @@ async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     msg = "?? ACTIVE DEALS:\n\n"
     for room_num, deal in active_deals.items():
-        duration = (datetime.now() - deal['created_at']).seconds // 60
+        duration = (get_ist_datetime() - deal['created_at']).seconds // 60
         msg += (
             f"?? Room {room_num}\n"
             f"ID: {deal['deal_id']}\n"
@@ -1081,12 +1124,13 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"? No active deal in room {room_num}")
             return
         
-        deal['completed_at'] = datetime.now()
+        deal['completed_at'] = get_ist_datetime()
         duration = (deal['completed_at'] - deal['created_at']).seconds // 60
         
         if deal.get('amount'):
             deal_statistics.append({
                 'amount': deal['amount'],
+                'rate': deal.get('rate'),
                 'duration': duration,
                 'completed_at': deal['completed_at'],
                 'seller': deal.get('seller_user', 'N/A'),
@@ -1187,63 +1231,19 @@ async def total_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("?? No deals completed yet.")
         return
     
-    now = datetime.now()
+    now = get_ist_datetime()
     
     daily = [d for d in deal_statistics if (now - d['completed_at']).total_seconds() <= 86400]
     weekly = [d for d in deal_statistics if (now - d['completed_at']).days <= 7]
     monthly = [d for d in deal_statistics if (now - d['completed_at']).days <= 30]
     
-    def calc_stats(deals):
-        if not deals:
-            return None
-        amounts = [d['amount'] for d in deals]
-        total_vol = sum(amounts)
-        avg_deal = total_vol / len(deals)
-        return {
-            'count': len(deals),
-            'volume': total_vol,
-            'average': avg_deal,
-            'highest': max(amounts),
-            'lowest': min(amounts)
-        }
-    
-    daily_stats = calc_stats(daily)
-    weekly_stats = calc_stats(weekly)
-    monthly_stats = calc_stats(monthly)
-    
-    msg = "?? DEAL STATISTICS\n\n"
-    
-    if daily_stats:
-        msg += (
-            f"?? DAILY (Last 24 Hours)\n"
-            f"Deals: {daily_stats['count']}\n"
-            f"Volume: ${daily_stats['volume']:,.2f}\n"
-            f"Average: ${daily_stats['average']:,.2f}\n"
-            f"Highest: ${daily_stats['highest']:,.2f}\n"
-            f"Lowest: ${daily_stats['lowest']:,.2f}\n"
-            f"??????????????????\n\n"
-        )
-    
-    if weekly_stats:
-        msg += (
-            f"?? WEEKLY (Last 7 Days)\n"
-            f"Deals: {weekly_stats['count']}\n"
-            f"Volume: ${weekly_stats['volume']:,.2f}\n"
-            f"Average: ${weekly_stats['average']:,.2f}\n"
-            f"Highest: ${weekly_stats['highest']:,.2f}\n"
-            f"Lowest: ${weekly_stats['lowest']:,.2f}\n"
-            f"??????????????????\n\n"
-        )
-    
-    if monthly_stats:
-        msg += (
-            f"?? MONTHLY (Last 30 Days)\n"
-            f"Deals: {monthly_stats['count']}\n"
-            f"Volume: ${monthly_stats['volume']:,.2f}\n"
-            f"Average: ${monthly_stats['average']:,.2f}\n"
-            f"Highest: ${monthly_stats['highest']:,.2f}\n"
-            f"Lowest: ${monthly_stats['lowest']:,.2f}\n"
-        )
+    msg = (
+        f"?? DEAL STATISTICS\n\n"
+        f"?? 1 Day Deals: {len(daily)}\n"
+        f"?? Weekly Deals: {len(weekly)}\n"
+        f"?? Monthly Deals: {len(monthly)}\n"
+        f"?? Deals Since Beginning: {len(deal_statistics)}"
+    )
     
     await update.message.reply_text(msg)
 
@@ -1344,7 +1344,7 @@ def main():
         if app.job_queue:
             app.job_queue.run_daily(
                 send_daily_stats,
-                time=time(hour=8, minute=30),
+                time=time(hour=8, minute=30, tzinfo=IST),
                 name='daily_stats'
             )
             logger.info("? Daily stats scheduler enabled")

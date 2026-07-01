@@ -860,7 +860,7 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏦 Wallet:\n"
             f"<code>{escrow}</code>\n\n"
             f"👤 Seller @{deal['seller_user']}, send {calc['total']} {coin} to the above wallet, then click the button below.",
-            reply_markup=InlineKeyboardMarkup(kb)
+            reply_markup=InlineKeyboardMarkup(kb),
             parse_mode="HTML"
         )
         

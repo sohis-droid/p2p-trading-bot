@@ -314,7 +314,7 @@ async def check_deal_timeout(context: ContextTypes.DEFAULT_TYPE, room_num: int):
         
         timeout_msg = (
             f"⌛ DEAL ROOM EXPIRED\n\n"
-            f"?? No activity for 5 minutes. Both parties have been removed from the deal room."
+            f"⌛ No activity for 5 minutes. Both parties have been removed from the deal room."
         )
         
         try:
@@ -373,13 +373,13 @@ async def get_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def fees_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show fee structure"""
     await update.message.reply_text(
-    f"?? FEE STRUCTURE\n\n"
+    f"💰 FEE STRUCTURE\n\n"
     f"Below $1000: $1 fixed\n"
     f"Above $1000: 0.1%\n\n"
     f"Examples:\n"
-    f"- $500 ? Fee: $1\n"
-    f"- $5,000 ? Fee: $5\n"
-    f"- $10,000 ? Fee: $10"
+    f"- $500 ➜ Fee: $1\n"
+    f"- $5,000 ➜ Fee: $5\n"
+    f"- $10,000 ➜ Fee: $10"
 
     )
 
@@ -389,7 +389,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     match = re.search(r'/deal\s+@(\w+)', update.message.text)
     if not match:
-        await update.message.reply_text("? Use: /deal @username")
+        await update.message.reply_text("⚠️ Use: /deal @username")
         return
     
     initiator_id = update.message.from_user.id
@@ -399,7 +399,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = get_available_room()
     if not room_num:
         deal_queue.append((initiator_id, other_user, initiator_user))
-        await update.message.reply_text(f"? All rooms busy! Queued (Position: {len(deal_queue)})")
+        await update.message.reply_text(f"🚪 All rooms busy! Queued (Position: {len(deal_queue)})")
         return
     
     room_availability[room_num] = False
@@ -478,34 +478,34 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     deal = get_deal(room_num)
     if not deal:
-        await q.edit_message_text("? Deal not found")
+        await q.edit_message_text("🤝 Deal not found")
         return
     
     if deal.get('roles_selected'):
-        await q.answer("? Roles already confirmed!", show_alert=True)
+        await q.answer("👥 Roles already confirmed!", show_alert=True)
         return
     
     if role == 'seller':
         if deal.get('seller_id'):
-            await q.answer("? Seller role already taken!", show_alert=True)
+            await q.answer("👤 Seller role already taken!", show_alert=True)
             return
         
         deal['seller_id'] = user_id
         deal['seller_user'] = username
         if 'seller' not in deal['roles']:
             deal['roles'].append('seller')
-        await q.answer("? You are now the Seller!")
+        await q.answer("👤 You are now the Seller!")
         
     elif role == 'buyer':
         if deal.get('buyer_id'):
-            await q.answer("? Buyer role already taken!", show_alert=True)
+            await q.answer("👤 Buyer role already taken!", show_alert=True)
             return
         
         deal['buyer_id'] = user_id
         deal['buyer_user'] = username
         if 'buyer' not in deal['roles']:
             deal['roles'].append('buyer')
-        await q.answer("? You are now the Buyer!")
+        await q.answer("👤 You are now the Buyer!")
     
     seller_text = f"@{deal['seller_user']}" if deal.get('seller_user') else "Waiting..."
     buyer_text = f"@{deal['buyer_user']}" if deal.get('buyer_user') else "Waiting..."
@@ -520,21 +520,21 @@ async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👤 Buyer: {buyer_text}"
         )
         
-        kb = [[InlineKeyboardButton("?🚀 Start Setup", callback_data=f'setup_{room_num}')]]
+        kb = [[InlineKeyboardButton("🚀 Start Setup", callback_data=f'setup_{room_num}')]]
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
-            "? Both roles confirmed! Ready to start?",
+            "👥 Both roles confirmed! Ready to start🚀",
             reply_markup=InlineKeyboardMarkup(kb)
         )
     else:
         if 'seller' in deal['roles']:
-            status = "? Seller confirmed!\n? Waiting for buyer..."
+            status = "👤 Seller confirmed!\n👤 Waiting for buyer..."
         else:
-            status = "? Buyer confirmed!\n? Waiting for seller..."
+            status = "👤 Buyer confirmed!\n👤 Waiting for seller..."
         
         kb = [
-            [InlineKeyboardButton("?? I'm Seller", callback_data=f'role_seller_{room_num}')],
-            [InlineKeyboardButton("?? I'm Buyer", callback_data=f'role_buyer_{room_num}')]
+            [InlineKeyboardButton("👤 I'm Seller", callback_data=f'role_seller_{room_num}')],
+            [InlineKeyboardButton("👤 I'm Buyer", callback_data=f'role_buyer_{room_num}')]
         ]
         
         await q.edit_message_text(
@@ -559,7 +559,7 @@ async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data[f'room_{room_num}'] = room_num
     context.bot_data[f'step_{room_num}'] = 'amount'
     
-    await q.edit_message_text(f"?? Seller @{deal['seller_user']}, enter amount (e.g., 1000):")
+    await q.edit_message_text(f"👤 Seller @{deal['seller_user']}, enter amount (e.g., 1000):")
 
 async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat_id not in DEAL_ROOMS.values():
@@ -589,12 +589,12 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             calc = calculate_fees(deal['amount'])
             await update.message.reply_text(
                 f"💰 Amount: ${text}\n"
-                f"?? Fee: ${calc['fee']}\n"
-                f"?? Total with fee: ${calc['total']}\n\n"
-                f"?? Enter rate (e.g., 93):"
+                f"💰 Fee: ${calc['fee']}\n"
+                f"💰 Total with fee: ${calc['total']}\n\n"
+                f"📈 Enter rate (e.g., 93):"
             )
         except:
-            await update.message.reply_text("? Invalid! Enter number")
+            await update.message.reply_text("⚠️ Invalid! Enter number")
             
     elif step == 'rate':
         try:
@@ -606,11 +606,11 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("Solana", callback_data=f'chain_SOL_{room_num}')]
             ]
             await update.message.reply_text(
-                f"? Rate: {text}\n\n?? Select chain:",
+                f"📈 Rate: {text}\n\n🌐 Select chain:",
                 reply_markup=InlineKeyboardMarkup(kb)
             )
         except:
-            await update.message.reply_text("? Invalid! Enter number")
+            await update.message.reply_text("⚠️ Invalid! Enter number")
     
     elif step == 'tx_hash':
         if update.message.from_user.id != deal['seller_id']:
@@ -647,7 +647,7 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal['status'] = 'auto_verified'
             deal['verification_message'] = message
             
-            kb = [[InlineKeyboardButton("? Approve & Continue", callback_data=f'verify_{room_num}')]]
+            kb = [[InlineKeyboardButton("✅ Approve & Continue", callback_data=f'verify_{room_num}')]]
             
             # Notify admins with auto-verification result
             for admin_id in ADMIN_IDS:
@@ -680,7 +680,7 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deal['status'] = 'pending_verification'
             deal['verification_message'] = message
             
-            kb = [[InlineKeyboardButton("? Verify Manually", callback_data=f'verify_{room_num}')]]
+            kb = [[InlineKeyboardButton("⚠️ Verify Manually", callback_data=f'verify_{room_num}')]]
             
             # Notify admins to verify manually
             for admin_id in ADMIN_IDS:
@@ -718,11 +718,11 @@ async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deal['status'] = 'waiting_buyer_payment'
         context.bot_data[f'step_{room_num}'] = None
         
-        await update.message.reply_text("? Payment details saved!")
+        await update.message.reply_text("💵 Payment details saved!")
         
         calc = calculate_fees(deal['amount'])
         fiat = deal['amount'] * deal['rate']
-        kb = [[InlineKeyboardButton("? I Paid Seller", callback_data=f'paid_{room_num}')]]
+        kb = [[InlineKeyboardButton("👤 I Paid Seller", callback_data=f'paid_{room_num}')]]
         
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
@@ -753,7 +753,7 @@ async def chain_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("USDT", callback_data=f'coin_USDT_{room_num}')],
         [InlineKeyboardButton("USDC", callback_data=f'coin_USDC_{room_num}')]
     ]
-    await q.edit_message_text(f"? Chain: {chain}\n\n?? Select coin:", reply_markup=InlineKeyboardMarkup(kb))
+    await q.edit_message_text(f"🌐 Chain: {chain}\n\n🌐 Select coin:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def coin_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -766,13 +766,13 @@ async def coin_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal['coin'] = coin
     
     kb = [
-        [InlineKeyboardButton("?? CDM", callback_data=f'paymode_cdm_{room_num}')],
-        [InlineKeyboardButton("?? CC (Cash Counter)", callback_data=f'paymode_cc_{room_num}')],
-        [InlineKeyboardButton("?? Cash (Hand to Hand)", callback_data=f'paymode_cash_{room_num}')],
-        [InlineKeyboardButton("?? Cash (Angadiya)", callback_data=f'paymode_angadiya_{room_num}')]
+        [InlineKeyboardButton("🏦 CDM", callback_data=f'paymode_cdm_{room_num}')],
+        [InlineKeyboardButton("🏦 CC (Cash Counter)", callback_data=f'paymode_cc_{room_num}')],
+        [InlineKeyboardButton("🤝 Cash (Hand to Hand)", callback_data=f'paymode_cash_{room_num}')],
+        [InlineKeyboardButton("📦 Cash (Angadiya)", callback_data=f'paymode_angadiya_{room_num}')]
     ]
     
-    await q.edit_message_text(f"? Coin: {coin}\n\n?? Payment method:", reply_markup=InlineKeyboardMarkup(kb))
+    await q.edit_message_text(f"🪙 Coin: {coin}\n\n💳 Payment method:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -858,9 +858,10 @@ async def pay_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔗 Chain: {chain}\n"
             f"🪙 Coin: {coin}\n"
             f"🏦 Wallet:\n"
-            f"{escrow}\n\n"
+            f"<code>{escrow}</code>\n\n"
             f"👤 Seller @{deal['seller_user']}, send {calc['total']} {coin} to the above wallet, then click the button below.",
             reply_markup=InlineKeyboardMarkup(kb)
+            parse_mode="HTML"
         )
         
         context.bot_data[f'step_{room_num}'] = None
@@ -876,14 +877,14 @@ async def crypto_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     room_num = int(q.data.split('_')[1])
     context.bot_data[f'step_{room_num}'] = 'tx_hash'
-    await q.edit_message_text("?? Seller, enter transaction hash:")
+    await q.edit_message_text("👤 Seller, enter transaction hash:")
 
 async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     
     if q.from_user.id not in ADMIN_IDS:
-        await q.answer("? Admin only!", show_alert=True)
+        await q.answer("👤 Admin only!", show_alert=True)
         return
     
     room_num = int(q.data.split('_')[1])
@@ -891,7 +892,7 @@ async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal['status'] = 'verified'
     
     verification_msg = deal.get('verification_message', 'Verified by admin')
-    await q.edit_message_text(f"? TX Verified!\n\n{verification_msg}")
+    await q.edit_message_text(f"📨 TX Verified!\n\n{verification_msg}")
     
     context.bot_data[f'step_{room_num}'] = 'payment_details'
     
@@ -908,16 +909,16 @@ async def buyer_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = int(q.data.split('_')[1])
     deal = get_deal(room_num)
     
-    await q.edit_message_text("? Payment claimed! Waiting for seller confirmation...")
+    await q.edit_message_text("💵 Payment claimed! Waiting for seller confirmation...")
     
     kb = [
-        [InlineKeyboardButton("? Received", callback_data=f'release_{room_num}')],
-        [InlineKeyboardButton("? Dispute", callback_data=f'dispute_{room_num}')]
+        [InlineKeyboardButton("☑️ Received", callback_data=f'release_{room_num}')],
+        [InlineKeyboardButton("⚠️ Dispute", callback_data=f'dispute_{room_num}')]
     ]
     
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"👤 Seller @{deal['seller_user']}, did you receive the payment?",
+        f"👤 Seller @{deal['seller_user']}, did you receive the payment💵",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
@@ -928,10 +929,10 @@ async def release_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num = int(q.data.split('_')[1])
     deal = get_deal(room_num)
     
-    await q.edit_message_text("? Seller confirmed! Notifying admin to release crypto...")
+    await q.edit_message_text("👤 Seller confirmed! Notifying admin to release crypto...")
     
     calc = calculate_fees(deal['amount'])
-    kb = [[InlineKeyboardButton("? Release", callback_data=f'final_{room_num}')]]
+    kb = [[InlineKeyboardButton("🔓 Release", callback_data=f'final_{room_num}')]]
     
     for admin_id in ADMIN_IDS:
         try:
@@ -953,7 +954,7 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     if q.from_user.id not in ADMIN_IDS:
-        await q.answer("? Admin only!", show_alert=True)
+        await q.answer("👤 Admin only!", show_alert=True)
         return
     
     room_num = int(q.data.split('_')[1])
@@ -989,12 +990,12 @@ async def final_release(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'completed_at': deal['completed_at']
     })
     
-    await q.edit_message_text("? Crypto Released!")
+    await q.edit_message_text("🔓 Crypto Released!")
     
     calc = calculate_fees(deal['amount'])
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"🎉 DEAL COMPLETED!\n\n? {calc['amount']} {deal['coin']} released to buyer\n\nThank you! ??"
+        f"🎉 DEAL COMPLETED!\n\n💲 {calc['amount']} {deal['coin']} released to buyer\n\nThank you! 👤"
     )
     
     original_msg_id = deal.get('original_msg_id')
@@ -1035,8 +1036,8 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("⚠️ DISPUTE RAISED! Admin will investigate...")
     
     kb = [
-        [InlineKeyboardButton("? Release to Buyer", callback_data=f'final_{room_num}')],
-        [InlineKeyboardButton("?? Refund to Seller", callback_data=f'refund_{room_num}')]
+        [InlineKeyboardButton("👤 Release to Buyer", callback_data=f'final_{room_num}')],
+        [InlineKeyboardButton("👤 Refund to Seller", callback_data=f'refund_{room_num}')]
     ]
     
     for admin_id in ADMIN_IDS:
@@ -1053,7 +1054,7 @@ async def dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("? Admin only!")
+        await update.message.reply_text("👤 Admin only!")
         return
     
     try:
@@ -1061,7 +1062,7 @@ async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deal = get_deal(room_num)
         
         if not deal:
-            await update.message.reply_text(f"? No active deal in room {room_num}")
+            await update.message.reply_text(f"🚪 No active deal in room {room_num}")
             return
         
         try:
@@ -1076,24 +1077,24 @@ async def cancel_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
-            "? Deal cancelled by admin"
+            "👤 Deal cancelled by admin"
         )
         
         room_availability[room_num] = True
         del active_deals[room_num]
         
-        await update.message.reply_text(f"? Deal in room {room_num} cancelled")
+        await update.message.reply_text(f"🚪 Deal in room {room_num} cancelled")
         
     except (IndexError, ValueError):
         await update.message.reply_text("Usage: /canceldeal <room_number>\nExample: /canceldeal 1")
 
 async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("? Admin only!")
+        await update.message.reply_text("👤 Admin only!")
         return
     
     if not active_deals:
-        await update.message.reply_text("? No active deals")
+        await update.message.reply_text("🤝 No active deals")
         return
     
     msg = "📊 ACTIVE DEALS:\n\n"
@@ -1113,7 +1114,7 @@ async def check_deals_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("? Admin only!")
+        await update.message.reply_text("👤 Admin only!")
         return
     
     try:
@@ -1121,7 +1122,7 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         deal = get_deal(room_num)
         
         if not deal:
-            await update.message.reply_text(f"? No active deal in room {room_num}")
+            await update.message.reply_text(f"🚪 No active deal in room {room_num}")
             return
         
         deal['completed_at'] = get_ist_datetime()
@@ -1138,12 +1139,12 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
             })
         
         calc = calculate_fees(deal.get('amount', 0)) if deal.get('amount') else None
-        completion_msg = f"? DEAL COMPLETED BY ADMIN\n\n"
+        completion_msg = f"👤 DEAL COMPLETED BY ADMIN\n\n"
         
         if calc and deal.get('coin'):
-            completion_msg += f"?💰 Amount: {calc['amount']} {deal['coin']}\n\n"
+            completion_msg += f"💰 Amount: {calc['amount']} {deal['coin']}\n\n"
         
-        completion_msg += "Thank you! ??"
+        completion_msg += "Thank you! 👤"
         
         await context.bot.send_message(
             DEAL_ROOMS[room_num],
@@ -1188,7 +1189,7 @@ async def complete_deal_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
         room_availability[room_num] = True
         del active_deals[room_num]
         
-        await update.message.reply_text(f"? Deal in room {room_num} marked as completed")
+        await update.message.reply_text(f"🚪 Deal in room {room_num} marked as completed")
         
     except (IndexError, ValueError):
         await update.message.reply_text("Usage: /completedeal <room_number>\nExample: /completedeal 1")
@@ -1197,7 +1198,7 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username or update.message.from_user.first_name
     
     if username not in user_deal_history or not user_deal_history[username]:
-        await update.message.reply_text("?? You have no completed deals yet.")
+        await update.message.reply_text("👤You have no completed deals yet.")
         return
     
     deals = user_deal_history[username]
@@ -1208,7 +1209,7 @@ async def my_deals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += f"━━━━━━━━━━━━━━━━━━\n\n"
     
     for deal in deals[-10:]:
-        role_emoji = "??" if deal['role'] == 'seller' else "??"
+        role_emoji = "⚖️" if deal['role'] == 'seller' else "⚖️"
         msg += (
             f"{role_emoji} {deal['deal_id']}\n"
             f"Role: {deal['role'].title()}\n"
@@ -1324,8 +1325,8 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"Both parties joined room {room_num}, sending role selection")
                 
                 kb = [
-                    [InlineKeyboardButton("?? I'm Seller", callback_data=f'role_seller_{room_num}')],
-                    [InlineKeyboardButton("?? I'm Buyer", callback_data=f'role_buyer_{room_num}')]
+                    [InlineKeyboardButton("👤 I'm Seller", callback_data=f'role_seller_{room_num}')],
+                    [InlineKeyboardButton("👤 I'm Buyer", callback_data=f'role_buyer_{room_num}')]
                 ]
                 
                 await context.bot.send_message(
@@ -1347,11 +1348,11 @@ def main():
                 time=time(hour=8, minute=30, tzinfo=IST),
                 name='daily_stats'
             )
-            logger.info("? Daily stats scheduler enabled")
+            logger.info("📊 Daily stats scheduler enabled")
         else:
-            logger.warning("?? JobQueue not available. Install with: pip install python-telegram-bot[job-queue]")
+            logger.warning("🔍 JobQueue not available. Install with: pip install python-telegram-bot[job-queue]")
     except Exception as e:
-        logger.warning(f"?? Could not schedule daily stats: {e}")
+        logger.warning(f"🔍 Could not schedule daily stats: {e}")
     
     # Command handlers
     app.add_handler(CommandHandler('getchatid', get_chat_id))
@@ -1380,7 +1381,7 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_member_join))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_handler))
     
-    logger.info("?? Bot Starting with Auto-Verification...")
+    logger.info("🤖 Bot Starting with Auto-Verification...")
     app.run_polling()
 
 if __name__ == '__main__':

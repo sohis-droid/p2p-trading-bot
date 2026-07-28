@@ -898,7 +898,7 @@ async def verify_tx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_message(
         DEAL_ROOMS[room_num],
-        f"✅ CRYPTO VERIFIED & IN ESCROW!\n\n"
+        f"✅ CRYPTO VERIFIED & IN ESCROW BY ADMIN. \n\n"
         f"👤 Seller @{deal['seller_user']}, please provide your payment details for {deal['payment_method']}:"
     )
 

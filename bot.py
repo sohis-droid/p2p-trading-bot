@@ -467,6 +467,7 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active_deals[room_num]
 
 async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"🔥 ROLE CALLBACK RECEIVED: {update.callback_query.data}")
     q = update.callback_query
     await q.answer()
     
@@ -562,10 +563,11 @@ async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text(f"👤 Seller @{deal['seller_user']}, enter amount (e.g., 1000):")
 
 async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat_id not in DEAL_ROOMS.values():
+    if not update.message:
         return
-    
-    room_num = None
+
+    if update.message.chat_id not in DEAL_ROOMS.values():
+       room_num = None
     for num, cid in DEAL_ROOMS.items():
         if cid == update.message.chat_id:
             room_num = num

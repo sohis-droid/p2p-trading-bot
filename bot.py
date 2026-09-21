@@ -1371,7 +1371,6 @@ def main():
         logger.warning(f"🔍 Could not schedule daily stats: {e}")
     
     # Command handlers
-    app.add_handler(CallbackQueryHandler(debug_callback, pattern='^role_'), group=0)
     app.add_handler(CommandHandler('getchatid', get_chat_id))
     app.add_handler(CommandHandler('deal', deal_cmd))
     app.add_handler(CommandHandler('fees', fees_cmd))  # NEW

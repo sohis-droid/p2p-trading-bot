@@ -465,7 +465,10 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
         room_availability[room_num] = True
         del active_deals[room_num]
-
+async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"🔥🔥 ANY CALLBACK RECEIVED: {update.callback_query.data}")
+    await update.callback_query.answer()
+    
 async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"🔥 ROLE CALLBACK RECEIVED: {update.callback_query.data}")
     q = update.callback_query
@@ -1357,6 +1360,7 @@ def main():
         logger.warning(f"🔍 Could not schedule daily stats: {e}")
     
     # Command handlers
+    app.add_handler(CallbackQueryHandler(debug_callback), group=0)
     app.add_handler(CommandHandler('getchatid', get_chat_id))
     app.add_handler(CommandHandler('deal', deal_cmd))
     app.add_handler(CommandHandler('fees', fees_cmd))  # NEW

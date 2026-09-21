@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-from telegram.ext import TypeHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
@@ -466,12 +465,8 @@ async def deal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {e}")
         room_availability[room_num] = True
         del active_deals[room_num]
-async def debug_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"🔥🔥 ANY CALLBACK RECEIVED: {update.callback_query.data}")
-    await update.callback_query.answer()
-    
+
 async def role_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"🔥 ROLE CALLBACK RECEIVED: {update.callback_query.data}")
     q = update.callback_query
     await q.answer()
     
@@ -567,11 +562,10 @@ async def start_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text(f"👤 Seller @{deal['seller_user']}, enter amount (e.g., 1000):")
 
 async def msg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
-
     if update.message.chat_id not in DEAL_ROOMS.values():
-       room_num = None
+        return
+    
+    room_num = None
     for num, cid in DEAL_ROOMS.items():
         if cid == update.message.chat_id:
             room_num = num
@@ -1343,19 +1337,9 @@ async def on_member_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"👥 Both parties have joined! Please select your role:",
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
-async def debug_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
-        logger.info(
-            f"🔥🔥🔥 RAW CALLBACK RECEIVED: {update.callback_query.data}"
-        )
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
-
-    app.add_handler(
-        TypeHandler(Update, debug_all_updates),
-        group=-1
-    )
     
     try:
         if app.job_queue:
@@ -1371,7 +1355,6 @@ def main():
         logger.warning(f"🔍 Could not schedule daily stats: {e}")
     
     # Command handlers
-    app.add_handler(CallbackQueryHandler(debug_callback, pattern='^role_'), group=0)
     app.add_handler(CommandHandler('getchatid', get_chat_id))
     app.add_handler(CommandHandler('deal', deal_cmd))
     app.add_handler(CommandHandler('fees', fees_cmd))  # NEW
@@ -1403,4 +1386,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
